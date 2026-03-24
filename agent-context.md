@@ -30,3 +30,22 @@ This app will be a useful single page web app where a user can easily mark off d
 
 # Agent Notes
 Use this space to keep notes about this project. Future agents will read this whole doc to get up to speed, add any information here that you think will be useful to help future agents add new features.
+
+## Architecture (v1 — March 2026)
+- Three files: `src/index.html`, `src/styles.css`, `src/app.js`. No build step, no frameworks, opens from `file://`.
+- All state lives in an IIFE in `app.js`. Key pieces:
+  - `state.daysRequired` (number, default 3) — configurable in-office day threshold
+  - `state.dayStates` (object keyed by `YYYY-MM-DD` → `"in-office"` | `"vacation"`) — only non-default days stored
+  - `state.vacationMode` (boolean) — toggles between normal and vacation click behavior
+- Date helpers: `toKey(date)` / `fromKey(key)` for `YYYY-MM-DD` ↔ `Date` conversion. `getSunday(date)` finds the Sunday of any date's week.
+- Evaluation functions: `evaluateWeek(sunday)` returns `{ inOfficeDays, meets }`. `evaluateWindow(startSunday)` evaluates 12 consecutive weeks starting from that Sunday, returns `{ passingWeeks, meets }`.
+- Rendering: `renderCalendar()` builds the full DOM once (26 weeks back + 26 weeks forward). `updateAll()` efficiently updates every week's info panel and day cell classes without rebuilding DOM.
+- Persistence: `localStorage` under key `"belt-planner-state"`, saves `daysRequired` and `dayStates` on every change, loaded on init.
+- Vacation drag: mousedown→mousemove→mouseup on day cells in vacation mode. Range is highlighted with `.drag-highlight` class, then all days set to vacation on mouseup.
+- Vacation edge buttons: ◀/▶ buttons appear on hover at the edges of vacation blocks to extend by one day.
+- Summary: computed from all windows whose 12-week span fits within the rendered range. Displayed as pass/fail badges in the sticky header.
+
+## Key CSS decisions
+- Layout: sticky header, `.week-row` uses `grid-template-columns: 1fr 3fr` for info/calendar split.
+- Day cell colors: `.weekend` = gray, `.default` = white, `.in-office` = green (#27ae60), `.vacation` = purple (#9b59b6).
+- Current week row gets blue border + shadow. Today's cell gets blue inset shadow.
