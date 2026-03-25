@@ -1,28 +1,95 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BELT Planner</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <header id="header">
-        <div class="header-top">
-            <h1>BELT Planner</h1>
-            <div class="header-controls">
-                <label>
-                    Days required:
-                    <input type="number" id="days-required" min="1" max="5" value="3">
-                </label>
-                <button id="vacation-mode-btn">Vacation Mode: OFF</button>
-            </div>
-        </div>
-        <div class="header-summary" id="summary">
-            <span id="summary-text">Loading...</span>
-        </div>
-    </header>
-    <main id="calendar-container"></main>
-    <script src="app.js"></script>
-</body>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>BELT Planner</title>
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body>
+		<div class="app-layout">
+			<aside class="sidebar" id="sidebar">
+				<h1>BELT Planner</h1>
+				<div class="sidebar-summary" id="summary">
+					<span id="summary-text">Loading...</span>
+				</div>
+				<div class="sidebar-group">
+					<span class="sidebar-label">Mark days:</span>
+					<div class="mode-toggle" id="mode-toggle">
+						<button class="mode-option in-office active" data-mode="in-office">
+							In office
+						</button>
+						<button class="mode-option out-of-office" data-mode="out-of-office">
+							Out of office
+						</button>
+					</div>
+				</div>
+				<div class="sidebar-settings">
+					<button id="settings-toggle-btn">Settings ▾</button>
+					<div class="settings-panel" id="settings-panel" hidden>
+						<div class="settings-row">
+							<label>
+								Days required per week:
+								<input
+									type="number"
+									id="days-required"
+									min="1"
+									max="5"
+									value="3"
+								/>
+							</label>
+						</div>
+						<div class="settings-row">
+							<label>
+								Weeks before today:
+								<input
+									type="number"
+									id="weeks-back"
+									min="1"
+									max="52"
+									value="12"
+								/>
+							</label>
+						</div>
+						<div class="settings-row">
+							<label>
+								Weeks after today:
+								<input
+									type="number"
+									id="weeks-forward"
+									min="1"
+									max="52"
+									value="26"
+								/>
+							</label>
+						</div>
+						<div class="settings-row holiday-toggle">
+							<label>
+								<input type="checkbox" id="show-holidays" />
+								Show Microsoft company holidays
+							</label>
+						</div>
+						<div class="settings-row">
+							<span class="settings-label">Regular in-office days:</span>
+							<div class="regular-days-checkboxes" id="regular-days-checkboxes">
+								<label><input type="checkbox" data-day="0" /> Sun</label>
+								<label><input type="checkbox" data-day="1" /> Mon</label>
+								<label><input type="checkbox" data-day="2" /> Tue</label>
+								<label><input type="checkbox" data-day="3" /> Wed</label>
+								<label><input type="checkbox" data-day="4" /> Thu</label>
+								<label><input type="checkbox" data-day="5" /> Fri</label>
+								<label><input type="checkbox" data-day="6" /> Sat</label>
+							</div>
+						</div>
+					</div>
+				</div>
+			</aside>
+			<div class="main-wrapper">
+				<main id="calendar-container"></main>
+				<div class="minimap" id="minimap"></div>
+			</div>
+		</div>
+		<div class="cursor-dot" id="cursor-dot"></div>
+		<script src="app.js"></script>
+	</body>
 </html>
