@@ -4,29 +4,72 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>BELT Planner</title>
+		<link rel="icon" type="image/svg+xml" href="app-icon.svg" />
 		<link rel="stylesheet" href="styles.css" />
 	</head>
 	<body>
+		<svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+			<defs>
+				<symbol id="icon-calendar" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="13" rx="2"/><path d="M6 2.5v4m8-4v4M3 8h14M6.5 11h2m3 0h2m-7 3h2"/></symbol>
+				<symbol id="icon-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 9v5m0-8h.01"/></symbol>
+				<symbol id="icon-question" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M8 7.5a2 2 0 0 1 4 0c0 1.5-2 1.5-2 3.5m0 2.5h.01"/></symbol>
+				<!--
+				Building, Home, and Door Arrow Right icons: Microsoft Fluent UI System Icons
+				https://github.com/microsoft/fluentui-system-icons
+				MIT License
+				Copyright (c) 2020 Microsoft Corporation
+
+				Permission is hereby granted, free of charge, to any person obtaining a copy
+				of this software and associated documentation files (the "Software"), to deal
+				in the Software without restriction, including without limitation the rights
+				to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+				copies of the Software, and to permit persons to whom the Software is
+				furnished to do so, subject to the following conditions:
+
+				The above copyright notice and this permission notice shall be included in all
+				copies or substantial portions of the Software.
+
+				THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+				IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+				FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+				AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+				LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+				OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+				SOFTWARE.
+				-->
+				<symbol id="icon-office" viewBox="0 0 20 20"><path fill="currentColor" stroke="none" d="M4 3.5C4 2.67157 4.67157 2 5.5 2H11.5C12.3284 2 13 2.67157 13 3.5V8H14.5C15.3284 8 16 8.67157 16 9.5V17.5C16 17.7761 15.7761 18 15.5 18H13V14.5C13 14.2239 12.7761 14 12.5 14H7.5C7.22386 14 7 14.2239 7 14.5V18H4.5C4.22386 18 4 17.7761 4 17.5V3.5ZM6.75 6.5C7.16421 6.5 7.5 6.16421 7.5 5.75C7.5 5.33579 7.16421 5 6.75 5C6.33579 5 6 5.33579 6 5.75C6 6.16421 6.33579 6.5 6.75 6.5ZM7.5 8.75C7.5 8.33579 7.16421 8 6.75 8C6.33579 8 6 8.33579 6 8.75C6 9.16421 6.33579 9.5 6.75 9.5C7.16421 9.5 7.5 9.16421 7.5 8.75ZM6.75 12.5C7.16421 12.5 7.5 12.1642 7.5 11.75C7.5 11.3358 7.16421 11 6.75 11C6.33579 11 6 11.3358 6 11.75C6 12.1642 6.33579 12.5 6.75 12.5ZM10.5 5.75C10.5 5.33579 10.1642 5 9.75 5C9.33579 5 9 5.33579 9 5.75C9 6.16421 9.33579 6.5 9.75 6.5C10.1642 6.5 10.5 6.16421 10.5 5.75ZM9.75 9.5C10.1642 9.5 10.5 9.16421 10.5 8.75C10.5 8.33579 10.1642 8 9.75 8C9.33579 8 9 8.33579 9 8.75C9 9.16421 9.33579 9.5 9.75 9.5ZM10.5 11.75C10.5 11.3358 10.1642 11 9.75 11C9.33579 11 9 11.3358 9 11.75C9 12.1642 9.33579 12.5 9.75 12.5C10.1642 12.5 10.5 12.1642 10.5 11.75ZM12.75 12.5C13.1642 12.5 13.5 12.1642 13.5 11.75C13.5 11.3358 13.1642 11 12.75 11C12.3358 11 12 11.3358 12 11.75C12 12.1642 12.3358 12.5 12.75 12.5ZM12 15V18H10.5V15H12ZM9.5 15H8V18H9.5V15Z"/></symbol>
+				<symbol id="icon-home" viewBox="0 0 20 20"><path fill="currentColor" stroke="none" d="M11.0025 2.38811C10.4323 1.87584 9.56767 1.87584 8.9975 2.38811L3.4975 7.32965C3.18086 7.61414 3 8.01977 3 8.44544V15.4996C3 16.328 3.67157 16.9996 4.5 16.9996H6.5C7.32843 16.9996 8 16.328 8 15.4996V11.4996C8 11.2234 8.22386 10.9996 8.5 10.9996H11.5C11.7761 10.9996 12 11.2234 12 11.4996V15.4996C12 16.328 12.6716 16.9996 13.5 16.9996H15.5C16.3284 16.9996 17 16.328 17 15.4996V8.44544C17 8.01977 16.8191 7.61414 16.5025 7.32965L11.0025 2.38811Z"/></symbol>
+				<symbol id="icon-away" viewBox="0 0 20 20"><path fill="currentColor" stroke="none" d="M14.5 10C16.9853 10 19 12.0147 19 14.5C19 16.9853 16.9853 19 14.5 19C12.0147 19 10 16.9853 10 14.5C10 12.0147 12.0147 10 14.5 10ZM14 2C15.1046 2 16 2.89543 16 4V9.20801C15.5231 9.0731 15.0201 9 14.5 9C11.4624 9 9 11.4624 9 14.5C9 15.8298 9.47231 17.049 10.2578 18H6C4.89543 18 4 17.1046 4 16V4C4 2.89543 4.89543 2 6 2H14ZM14.8535 12.1465C14.6583 11.9512 14.3417 11.9512 14.1465 12.1465C13.9512 12.3417 13.9512 12.6583 14.1465 12.8535L15.293 14H12.5C12.2239 14 12 14.2239 12 14.5C12 14.7761 12.2239 15 12.5 15H15.293L14.1465 16.1465C13.9512 16.3417 13.9512 16.6583 14.1465 16.8535C14.3417 17.0488 14.6583 17.0488 14.8535 16.8535L16.8555 14.8516C16.9492 14.7567 16.9992 14.6363 17 14.5029C17 14.3726 16.9515 14.2445 16.8535 14.1465L14.8535 12.1465ZM7 9C6.44772 9 6 9.44771 6 10C6 10.5523 6.44772 11 7 11C7.55228 11 8 10.5523 8 10C8 9.44771 7.55228 9 7 9Z"/></symbol>
+				<symbol id="icon-settings" viewBox="0 0 20 20"><path d="M3 5h14M3 10h14M3 15h14"/><circle cx="7" cy="5" r="2"/><circle cx="13" cy="10" r="2"/><circle cx="8" cy="15" r="2"/></symbol>
+				<symbol id="icon-check" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="m6.5 10 2.3 2.3 4.7-4.8"/></symbol>
+				<symbol id="icon-warning" viewBox="0 0 20 20"><path d="m9 3-7 12a1 1 0 0 0 1 2h14a1 1 0 0 0 1-2L11 3a1.2 1.2 0 0 0-2 0ZM10 7v4m0 3h.01"/></symbol>
+				<symbol id="icon-dismiss" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="m7.5 7.5 5 5m0-5-5 5"/></symbol>
+				<symbol id="icon-chevron" viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"/></symbol>
+				<symbol id="icon-left" viewBox="0 0 20 20"><path d="m12 5-5 5 5 5"/></symbol>
+				<symbol id="icon-right" viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></symbol>
+			</defs>
+		</svg>
 		<div class="app-layout">
 			<aside class="sidebar" id="sidebar">
-				<h1>BELT Planner</h1>
-				<div class="sidebar-summary" id="summary">
-					<span id="summary-text">Loading...</span>
+				<div class="app-brand">
+					<img class="app-logo" src="app-icon.svg" alt="" width="28" height="28" />
+					<h2>BELT Planner</h2>
 				</div>
-				<div class="sidebar-group">
-					<span class="sidebar-label">Mark days:</span>
-					<div class="mode-toggle" id="mode-toggle">
-						<button class="mode-option in-office active" data-mode="in-office">
-							In office
-						</button>
-						<button class="mode-option out-of-office" data-mode="out-of-office">
-							Out of office
+				<div class="sidebar-summary" id="summary">
+					<div class="summary-heading">
+						<h3>Rolling window overview</h3>
+						<button class="info-button" type="button" aria-label="About rolling window evaluation" aria-describedby="rolling-window-help" aria-expanded="false" data-info-tooltip="rolling-window-help">
+							<svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>
 						</button>
 					</div>
+					<div id="summary-text" aria-live="polite">Loading...</div>
 				</div>
 				<div class="sidebar-settings">
-					<button id="settings-toggle-btn">Settings ▾</button>
-					<div class="settings-panel" id="settings-panel" hidden>
+					<button id="settings-toggle-btn" class="active" aria-expanded="true" aria-controls="settings-panel">
+						Settings
+						<svg class="icon disclosure-icon" aria-hidden="true"><use href="#icon-chevron"/></svg>
+					</button>
+					<div class="settings-panel" id="settings-panel">
 						<div class="settings-row">
 							<label>
 								Days required per week:
@@ -83,13 +126,92 @@
 						</div>
 					</div>
 				</div>
+				<div class="policy-note">
+					<span>Data saved locally</span>
+					<button class="info-button" id="app-info-btn" type="button" aria-label="About BELT Planner and saved data" aria-haspopup="dialog" aria-controls="app-info-dialog">
+						<svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>
+					</button>
+				</div>
 			</aside>
 			<div class="main-wrapper">
-				<main id="calendar-container"></main>
-				<div class="minimap" id="minimap"></div>
+				<header class="workspace-header">
+					<h1>Calendar</h1>
+					<span class="edit-days-label">Go to:</span>
+					<button class="today-button" id="today-btn">
+						<svg class="icon" aria-hidden="true"><use href="#icon-calendar"/></svg>
+						Today
+					</button>
+					<button class="today-button" id="next-attention-btn" title="Jump to the next warning or below-target window">
+						<svg class="icon" aria-hidden="true"><use href="#icon-warning"/></svg>
+						Next error or warning
+					</button>
+					<span class="edit-days-label" id="edit-days-label">Edit days:</span>
+					<div class="mode-toggle" id="mode-toggle" role="group" aria-labelledby="edit-days-label" aria-describedby="mark-days-hint">
+						<button class="mode-option in-office" data-mode="in-office" aria-pressed="false">
+							<svg class="icon" aria-hidden="true"><use href="#icon-office"/></svg>
+							In office
+						</button>
+						<button class="mode-option out-of-office active" data-mode="out-of-office" aria-pressed="true">
+							<svg class="icon" aria-hidden="true"><use href="#icon-away"/></svg>
+							Out of office
+						</button>
+						<button class="mode-option work-from-home" data-mode="work-from-home" aria-pressed="false">
+							<svg class="icon" aria-hidden="true"><use href="#icon-home"/></svg>
+							Work from home
+						</button>
+					</div>
+					<dialog class="app-dialog" id="app-info-dialog" aria-labelledby="app-info-title">
+						<div class="dialog-heading">
+							<h2 id="app-info-title">About BELT Planner</h2>
+							<button class="info-button" id="close-app-info-btn" type="button" aria-label="Close About dialog" autofocus>
+								<svg class="icon" aria-hidden="true"><use href="#icon-dismiss"/></svg>
+							</button>
+						</div>
+						<dl class="app-details">
+							<dt>App Version</dt><dd id="app-version"></dd>
+							<dt>Published date</dt><dd><time id="app-published-date"></time></dd>
+						</dl>
+						<p>For questions or comments, get in touch with <a href="mailto:mattl@microsoft.com">mattl</a>.</p>
+						<p>App data is saved locally on your machine via Local Storage. To save a more permanent copy, download a save file. You can drag+drop a save file anywhere on the app to load it.</p>
+						<button class="today-button" id="download-save-btn" type="button">Download save file</button>
+						<p id="dialog-message" class="dialog-message" role="alert" hidden></p>
+					</dialog>
+					<div class="app-message" id="app-message" role="status" hidden>
+						<span id="app-message-text"></span>
+						<button class="info-button" id="dismiss-app-message-btn" type="button" aria-label="Dismiss message">
+							<svg class="icon" aria-hidden="true"><use href="#icon-dismiss"/></svg>
+						</button>
+					</div>
+					<button class="info-button" type="button" aria-label="About editing days" aria-describedby="edit-days-help" aria-expanded="false" data-info-tooltip="edit-days-help">
+						<svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>
+					</button>
+				</header>
+				<div class="calendar-column-header" id="calendar-column-header"></div>
+				<div class="calendar-scroll">
+					<main id="calendar-container" aria-label="Weekly calendar"></main>
+					<div class="minimap" id="minimap" role="navigation" aria-label="Jump to a week"></div>
+				</div>
 			</div>
 		</div>
-		<div class="cursor-dot" id="cursor-dot"></div>
+		<div class="info-tooltip" id="rolling-window-help" popover="auto" role="tooltip">
+			<h3>Rolling window overview</h3>
+			<p><strong>Each week:</strong> The in-office count is compared with your required days per week in Settings (3 by default). A week qualifies when it meets or exceeds that requirement.</p>
+			<p><strong>Each 12-week window:</strong> A row's Window status covers that week plus the following 11 weeks, not the previous weeks. It shows how many weeks qualify out of 12; hover over it for the window's dates. The Week status shows in-office days against the weekly requirement.</p>
+			<p><strong>Status:</strong> 9&ndash;12 qualifying weeks are Passing; exactly 8 are Warning (the minimum is met); fewer than 8 are Failing. The final 11 weeks do not have a complete forward window: their Window status shows a question mark and Not enough data, and their minimap segments are gray. They are excluded from the overview totals, but their individual Week status is still evaluated. Increase the range in Settings to evaluate more windows. If fewer than 12 weeks are configured, all windows have insufficient data.</p>
+		</div>
+		<div class="info-tooltip" id="edit-days-help" popover="auto" role="tooltip">
+			<h3>Edit days</h3>
+			<p id="mark-days-hint">Select a day to mark it. Click and drag to mark a range with any editing tool: In office, Out of office, or Work from home.</p>
+			<div class="calendar-legend" aria-label="Calendar legend">
+				<span><i class="legend-dot office"></i>In office</span>
+				<span><i class="legend-dot away"></i>Out of office</span>
+				<span><i class="legend-dot holiday"></i>Company holiday</span>
+				<span><i class="legend-dot weekend"></i>Weekend</span>
+				<span><i class="legend-dot work-from-home"></i>Work from home</span>
+			</div>
+		</div>
+		<div class="cursor-icon" id="cursor-icon" aria-hidden="true"></div>
+		<script src="app-info.js"></script>
 		<script src="app.js"></script>
 	</body>
 </html>
