@@ -25,18 +25,17 @@
 	const state = {
 		daysRequired: 3,
 		weeksBack: 12,
-		weeksForward: 26,
-		// Map<string(YYYY-MM-DD), "in-office"|"vacation">
-		// Absent key = default (weekday white / weekend gray)
+		weeksForward: 38,
+		// Map<string(YYYY-MM-DD), "in-office"|"vacation"|"work-from-home"|"default"|"weekend">
+		// Absent key = recurring schedule, or unmarked weekday/weekend
 		dayStates: {},
-		vacationMode: false,
+		markMode: 'out-of-office',
 		// Array of day-of-week indices (0=Sun..6=Sat) that are regular in-office days
 		regularDays: [],
 		showHolidays: true,
 	};
 
-	// Drag state for vacation mode
-	let dragState = null; // { startDate, currentDate, active }
+	let dragState = null; // { startDate, currentDate, mode, active }
 
 	// ===== Date Helpers =====
 	function toKey(date) {
@@ -80,12 +79,11 @@
 	function formatDateRange(sunday) {
 		const sat = addDays(sunday, 6);
 		return (
-			MONTH_NAMES[sunday.getMonth()] +
+			sunday.toLocaleDateString('en-US', { month: 'long' }) +
 			' ' +
 			sunday.getDate() +
-			' – ' +
-			MONTH_NAMES[sat.getMonth()] +
-			' ' +
+			' - ' +
+			(sunday.getMonth() === sat.getMonth() ? '' : sat.toLocaleDateString('en-US', { month: 'long' }) + ' ') +
 			sat.getDate()
 		);
 	}
@@ -144,8 +142,8 @@
 	}
 
 	// ===== Persistence =====
-	function saveState() {
-		const data = {
+	function getSavedState() {
+		return {
 			daysRequired: state.daysRequired,
 			weeksBack: state.weeksBack,
 			weeksForward: state.weeksForward,
@@ -153,17 +151,95 @@
 			regularDays: state.regularDays,
 			showHolidays: state.showHolidays,
 		};
-		try {
-			localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-		} catch (e) {
-			/* quota exceeded — silently ignore */
+	}
+
+	function showAppMessage(message, isError = false) {
+		const dialog = document.querySelector('.app-dialog[open]');
+		if (isError && dialog) {
+			const dialogMessage = dialog.querySelector('.dialog-message');
+			dialogMessage.textContent = message;
+			dialogMessage.hidden = false;
+			return;
 		}
+		const notification = document.getElementById('app-message');
+		document.getElementById('app-message-text').textContent = message;
+		notification.classList.toggle('error', isError);
+		notification.setAttribute('role', isError ? 'alert' : 'status');
+		notification.hidden = false;
+	}
+
+	function saveState() {
+		try {
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(getSavedState()));
+		} catch (e) {
+			console.error('Unable to save planner data locally.', e);
+			showAppMessage('Unable to save data locally. Download a save file from the app info dialog to keep your changes.', true);
+		}
+	}
+
+	function createSaveFile() {
+		const data = getSavedState();
+		data.dayStates = Object.fromEntries(Object.entries(data.dayStates).filter(([key, dayState]) =>
+			dayState !== 'in-office' || getScheduledDayState(fromKey(key)) !== 'in-office'));
+		return JSON.stringify({
+			app: 'BELT Planner',
+			formatVersion: 1,
+			appVersion: BELT_APP_INFO.version,
+			savedAt: new Date().toISOString(),
+			data,
+		}, null, 2);
+	}
+
+	function parseSaveFile(text) {
+		let file;
+		try {
+			file = JSON.parse(text);
+		} catch (error) {
+			if (!(error instanceof SyntaxError)) throw error;
+			throw new Error('The save file is not valid JSON.');
+		}
+		if (!file || file.app !== 'BELT Planner' || file.formatVersion !== 1) {
+			throw new Error('This is not a supported BELT Planner save file.');
+		}
+		const data = file.data;
+		if (!data || typeof data !== 'object' || Array.isArray(data) ||
+			!Number.isInteger(data.daysRequired) || data.daysRequired < 1 || data.daysRequired > 5 ||
+			!Number.isInteger(data.weeksBack) || data.weeksBack < 1 || data.weeksBack > 52 ||
+			!Number.isInteger(data.weeksForward) || data.weeksForward < 1 || data.weeksForward > 52 ||
+			typeof data.showHolidays !== 'boolean' ||
+			!Array.isArray(data.regularDays) ||
+			data.regularDays.some(day => !Number.isInteger(day) || day < 0 || day > 6) ||
+			new Set(data.regularDays).size !== data.regularDays.length ||
+			!data.dayStates || typeof data.dayStates !== 'object' || Array.isArray(data.dayStates)) {
+			throw new Error('The save file contains invalid planner settings.');
+		}
+		const allowedStates = ['in-office', 'vacation', 'work-from-home', 'default', 'weekend'];
+		const entries = Object.entries(data.dayStates);
+		if (entries.some(([key, value]) => !/^\d{4}-\d{2}-\d{2}$/.test(key) ||
+			toKey(fromKey(key)) !== key || !allowedStates.includes(value))) {
+			throw new Error('The save file contains invalid dates or day markings.');
+		}
+		return {
+			daysRequired: data.daysRequired,
+			weeksBack: data.weeksBack,
+			weeksForward: data.weeksForward,
+			regularDays: data.regularDays.slice(),
+			showHolidays: data.showHolidays,
+			dayStates: Object.fromEntries(entries),
+		};
+	}
+
+	function restoreSaveFile(text) {
+		const data = parseSaveFile(text);
+		// Persist before changing the current plan so a failed write leaves it intact.
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+		Object.assign(state, data);
 	}
 
 	function loadState() {
 		try {
 			const raw = localStorage.getItem(STORAGE_KEY);
-			if (!raw) return;
+			if (raw === null) return 'empty';
 			const data = JSON.parse(raw);
 			if (typeof data.daysRequired === 'number') {
 				state.daysRequired = data.daysRequired;
@@ -183,8 +259,11 @@
 			if (typeof data.weeksForward === 'number') {
 				state.weeksForward = data.weeksForward;
 			}
+			return 'loaded';
 		} catch (e) {
-			/* corrupted data — start fresh */
+			console.error('Unable to load locally saved planner data.', e);
+			showAppMessage('Unable to load locally saved data. Restore a save file, or clear local data from the app info dialog.', true);
+			return 'error';
 		}
 	}
 
@@ -192,6 +271,16 @@
 	function getDayState(date) {
 		const key = toKey(date);
 		if (state.dayStates[key]) return state.dayStates[key];
+		return getScheduledDayState(date);
+	}
+
+	function getScheduledDayState(date) {
+		if (
+			state.regularDays.indexOf(date.getDay()) !== -1 &&
+			!(state.showHolidays && holidayMap[toKey(date)])
+		) {
+			return 'in-office';
+		}
 		return isWeekend(date) ? 'weekend' : 'default';
 	}
 
@@ -233,15 +322,16 @@
 	}
 
 	// ===== Summary =====
+	function getCompleteWindowSundays(sundays) {
+		return sundays.slice(0, Math.max(0, sundays.length - WINDOW_SIZE + 1));
+	}
+
 	function computeSummary(sundays) {
 		let total = 0,
 			pass = 0,
 			warn = 0,
 			fail = 0;
-		for (const sun of sundays) {
-			// Only evaluate windows that have all 12 weeks in our range
-			const endSunday = addDays(sun, (WINDOW_SIZE - 1) * 7);
-			if (endSunday > sundays[sundays.length - 1]) continue;
+		for (const sun of getCompleteWindowSundays(sundays)) {
 			const result = evaluateWindow(sun);
 			total++;
 			if (result.passingWeeks >= 9) pass++;
@@ -255,15 +345,28 @@
 	const today = new Date();
 	today.setHours(0, 0, 0, 0);
 	const currentSunday = getSunday(today);
+	let lastAttentionWeekKey = toKey(currentSunday);
 	let weekSundays = [];
 
 	// Cache DOM refs per week for targeted updates
 	const weekElements = new Map(); // sunday key -> { row, infoCells, dayCells[] }
 
+	function createIcon(name) {
+		const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		icon.setAttribute('class', 'icon');
+		icon.setAttribute('aria-hidden', 'true');
+		const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+		use.setAttribute('href', '#icon-' + name);
+		icon.appendChild(use);
+		return icon;
+	}
+
 	function createDayCell(date) {
 		const cell = document.createElement('div');
 		cell.className = 'day-cell';
 		cell.dataset.date = toKey(date);
+		cell.tabIndex = 0;
+		cell.setAttribute('role', 'button');
 
 		const numSpan = document.createElement('span');
 		numSpan.className = 'day-number';
@@ -274,6 +377,10 @@
 		nameSpan.className = 'day-name';
 		nameSpan.textContent = DAY_NAMES[date.getDay()];
 		cell.appendChild(nameSpan);
+
+		const statusSpan = document.createElement('span');
+		statusSpan.className = 'day-status';
+		cell.appendChild(statusSpan);
 
 		updateDayCellClass(cell, date);
 		return cell;
@@ -286,21 +393,46 @@
 			'default',
 			'in-office',
 			'vacation',
+			'work-from-home',
 			'today',
 			'holiday',
 		);
 		cell.classList.add(s);
 		if (sameDay(date, today)) cell.classList.add('today');
+		cell.setAttribute('aria-pressed', String(s === 'in-office' || s === 'vacation'));
+		const holidayName = state.showHolidays && holidayMap[toKey(date)];
+		const statusName = s === 'vacation' ? 'Out of office'
+			: s === 'in-office' ? 'In office'
+			: s === 'work-from-home' ? 'Work from home'
+			: holidayName ? 'MSFT holiday'
+			: s === 'weekend' ? 'Weekend' : 'Work from home';
+		const fullDate = date.toLocaleDateString(undefined, {
+			weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+		});
+		cell.title = fullDate + '\nMarked as: ' + statusName
+			+ (holidayName ? '\n' + holidayName : '');
+		cell.setAttribute('aria-label', fullDate + ', Marked as: ' + statusName
+			+ (holidayName ? ', ' + holidayName : ''));
+		const statusSpan = cell.querySelector('.day-status');
+		statusSpan.replaceChildren();
+		if (s === 'in-office' || s === 'vacation' || s === 'work-from-home') {
+			statusSpan.appendChild(createIcon(s === 'in-office' ? 'office' : s === 'vacation' ? 'away' : 'home'));
+		} else if (s === 'default' && !holidayName) {
+			const icon = createIcon('home');
+			icon.setAttribute('class', 'icon implicit-home-icon');
+			statusSpan.appendChild(icon);
+		}
 
 		// Holiday indicator
 		var dateKey = cell.dataset.date;
 		var nameSpan = cell.querySelector('.day-name');
-		if (state.showHolidays && holidayMap[dateKey]) {
+		if (holidayName) {
 			cell.classList.add('holiday');
-			cell.title = holidayMap[dateKey];
-			nameSpan.textContent = holidayMap[dateKey];
+			nameSpan.textContent = holidayName;
+			if (s !== 'in-office' && s !== 'vacation' && s !== 'work-from-home') {
+				statusSpan.appendChild(createIcon('calendar'));
+			}
 		} else {
-			cell.title = '';
 			var d = fromKey(dateKey);
 			nameSpan.textContent = DAY_NAMES[d.getDay()];
 		}
@@ -318,8 +450,9 @@
 			if (prevState !== 'vacation') {
 				const btn = document.createElement('button');
 				btn.className = 'vacation-edge-btn left';
-				btn.textContent = '◀';
+				btn.appendChild(createIcon('left'));
 				btn.title = 'Extend vacation one day earlier';
+				btn.setAttribute('aria-label', btn.title);
 				btn.addEventListener('click', function (e) {
 					e.stopPropagation();
 					state.dayStates[toKey(prev)] = 'vacation';
@@ -331,8 +464,9 @@
 			if (nextState !== 'vacation') {
 				const btn = document.createElement('button');
 				btn.className = 'vacation-edge-btn right';
-				btn.textContent = '▶';
+				btn.appendChild(createIcon('right'));
 				btn.title = 'Extend vacation one day later';
+				btn.setAttribute('aria-label', btn.title);
 				btn.addEventListener('click', function (e) {
 					e.stopPropagation();
 					state.dayStates[toKey(next)] = 'vacation';
@@ -347,9 +481,6 @@
 	function updateWeekInfo(sunday, infoEl) {
 		const weekResult = evaluateWeek(sunday);
 		const windowResult = evaluateWindow(sunday);
-		const lastSunday = weekSundays[weekSundays.length - 1];
-		const windowEndSunday = addDays(sunday, (WINDOW_SIZE - 1) * 7);
-		const outOfRange = windowEndSunday > lastSunday;
 
 		infoEl.innerHTML = '';
 
@@ -358,63 +489,85 @@
 		rangeDiv.textContent = formatDateRange(sunday);
 		infoEl.appendChild(rangeDiv);
 
-		const statsDiv = document.createElement('div');
-		statsDiv.className = 'week-stats';
-		statsDiv.textContent =
-			'In-office: ' +
-			weekResult.inOfficeDays +
-			'/' +
-			state.daysRequired +
-			(weekResult.meets ? ' ✓' : ' ✗');
-		infoEl.appendChild(statsDiv);
-
-		const badge = document.createElement('span');
-		const windowStart = sunday;
+		const statuses = document.createElement('div');
+		statuses.className = 'week-statuses';
 		const windowEnd = addDays(sunday, WINDOW_SIZE * 7 - 1);
-
-		if (outOfRange) {
-			badge.className = 'window-badge out-of-range';
-			badge.textContent =
-				'Window ' +
-				(windowStart.getMonth() + 1) +
-				'/' +
-				windowStart.getDate() +
-				' to ' +
-				(windowEnd.getMonth() + 1) +
-				'/' +
-				windowEnd.getDate() +
-				'  |  Out of range';
-		} else {
-			var badgeLevel;
-			if (windowResult.passingWeeks >= 9) {
-				badgeLevel = 'good';
-			} else if (windowResult.passingWeeks === 8) {
-				badgeLevel = 'warn';
-			} else {
-				badgeLevel = 'fail';
-			}
-			badge.className = 'window-badge ' + badgeLevel;
-			var badgeIcon =
-				badgeLevel === 'good' ? ' ✓' : badgeLevel === 'warn' ? ' ⚠' : ' ✗';
-			badge.textContent =
-				'Window ' +
-				(windowStart.getMonth() + 1) +
-				'/' +
-				windowStart.getDate() +
-				' to ' +
-				(windowEnd.getMonth() + 1) +
-				'/' +
-				windowEnd.getDate() +
-				'  |  ' +
-				windowResult.passingWeeks +
-				' of ' +
-				WINDOW_SIZE +
-				badgeIcon;
-		}
-		infoEl.appendChild(badge);
+		const windowLevel = getWeekWindowStatus(sunday);
+		[
+			{
+				label: 'Week', count: weekResult.inOfficeDays, total: state.daysRequired,
+				level: weekResult.meets ? 'good' : 'fail',
+				description: 'In-office days / required days',
+			},
+			{
+				label: 'Window', count: windowResult.passingWeeks, total: WINDOW_SIZE,
+				level: windowLevel,
+				description: 'Qualifying weeks / 12 weeks, ' + sunday.toLocaleDateString()
+					+ ' to ' + windowEnd.toLocaleDateString(),
+			},
+		].forEach(function (status) {
+			const row = document.createElement('div');
+			row.className = 'week-status ' + status.level;
+			row.title = status.description;
+			row.setAttribute('role', 'group');
+			const incomplete = status.level === 'out-of-range';
+			row.setAttribute('aria-label', status.label + ': '
+				+ (incomplete ? 'Not enough data' : status.count + ' of ' + status.total)
+				+ ', ' + status.description);
+			row.appendChild(createIcon(incomplete ? 'question' : status.level === 'good' ? 'check' : status.level === 'warn' ? 'warning' : 'dismiss'));
+			const label = document.createElement('span');
+			label.textContent = status.label;
+			row.appendChild(label);
+			const count = document.createElement('span');
+			count.className = 'week-status-count';
+			count.textContent = incomplete ? 'Not enough data' : status.count + ' / ' + status.total;
+			row.appendChild(count);
+			statuses.appendChild(row);
+		});
+		infoEl.appendChild(statuses);
 	}
 
-	function renderCalendar() {
+	function syncColumnHeader() {
+		const calendar = document.getElementById('calendar-container');
+		const scroller = document.querySelector('.calendar-scroll');
+		const header = document.getElementById('calendar-column-header');
+		const row = header.querySelector('.day-header-row');
+		if (!row) return;
+		const style = getComputedStyle(calendar);
+		const calendarWidth = calendar.getBoundingClientRect().width;
+		const headerWidth = scroller.scrollWidth + scroller.offsetWidth - scroller.clientWidth;
+		row.style.gridTemplateColumns = style.gridTemplateColumns;
+		row.style.width = headerWidth + 'px';
+		row.style.paddingLeft = style.paddingLeft;
+		row.style.paddingRight = (parseFloat(style.paddingRight) + headerWidth - calendarWidth) + 'px';
+		header.scrollLeft = scroller.scrollLeft;
+	}
+
+	function highlightNavigationTarget(element) {
+		element.classList.remove('navigation-highlight');
+		// Flush the removed class so repeated navigation restarts the animation.
+		void element.offsetWidth;
+		element.classList.add('navigation-highlight');
+	}
+
+	function handleNavigationHighlightEnd(event) {
+		if (event.animationName === 'week-navigation-highlight' || event.animationName === 'week-navigation-highlight-fade') {
+			event.target.classList.remove('navigation-highlight');
+		}
+	}
+
+	function scrollToWeek(row, behavior = 'smooth', highlight = true) {
+		document.querySelectorAll('.week-row.navigation-highlight').forEach(function (highlighted) {
+			highlighted.classList.remove('navigation-highlight');
+		});
+		row.scrollIntoView({
+			block: 'center',
+			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : behavior,
+		});
+		if (highlight) highlightNavigationTarget(row);
+	}
+
+	function renderCalendar(highlightCurrentWeek = true) {
 		weekSundays = getWeekSundays();
 		const container = document.getElementById('calendar-container');
 		container.innerHTML = '';
@@ -424,6 +577,8 @@
 		const headerRow = document.createElement('div');
 		headerRow.className = 'day-header-row';
 		const spacer = document.createElement('div');
+		spacer.className = 'day-label';
+		spacer.textContent = 'Status';
 		headerRow.appendChild(spacer);
 		const monthSpacer = document.createElement('div');
 		headerRow.appendChild(monthSpacer);
@@ -436,7 +591,7 @@
 			labels.appendChild(lbl);
 		});
 		headerRow.appendChild(labels);
-		container.appendChild(headerRow);
+		document.getElementById('calendar-column-header').replaceChildren(headerRow);
 
 		weekSundays.forEach(function (sunday) {
 			const row = document.createElement('div');
@@ -456,7 +611,7 @@
 			for (var d = 0; d < 7; d++) {
 				var dayDate = addDays(sunday, d);
 				if (dayDate.getDate() === 1) {
-					monthText = MONTH_NAMES[dayDate.getMonth()];
+					monthText = dayDate.toLocaleDateString('en-US', { month: 'long' });
 					break;
 				}
 			}
@@ -488,40 +643,37 @@
 		const currentKey = toKey(currentSunday);
 		const current = weekElements.get(currentKey);
 		if (current) {
-			current.row.scrollIntoView({ block: 'center' });
+			scrollToWeek(current.row, 'instant', highlightCurrentWeek);
 		}
+		syncColumnHeader();
 	}
 
 	function updateSummary() {
 		const summary = computeSummary(weekSundays);
 		const el = document.getElementById('summary-text');
 		el.innerHTML = '';
-		const evalLabel = document.createElement('span');
-		evalLabel.className = 'sidebar-label';
-		evalLabel.textContent = 'Windows evaluated: ';
-		el.appendChild(evalLabel);
-		el.appendChild(document.createTextNode(summary.total));
-
-		el.appendChild(document.createElement('br'));
-
-		const passBadge = document.createElement('span');
-		passBadge.className = 'summary-badge good';
-		passBadge.textContent = '\u2713 Pass: ' + summary.pass;
-		el.appendChild(passBadge);
-
-		el.appendChild(document.createTextNode('  '));
-
-		const warnBadge = document.createElement('span');
-		warnBadge.className = 'summary-badge warn';
-		warnBadge.textContent = '\u26A0 Warn: ' + summary.warn;
-		el.appendChild(warnBadge);
-
-		el.appendChild(document.createTextNode('  '));
-
-		const failBadge = document.createElement('span');
-		failBadge.className = 'summary-badge fail';
-		failBadge.textContent = '\u2717 Fail: ' + summary.fail;
-		el.appendChild(failBadge);
+		const statuses = document.createElement('div');
+		statuses.className = 'summary-statuses';
+		[
+			{ level: 'good', icon: 'check', label: 'Passing', count: summary.pass },
+			{ level: 'warn', icon: 'warning', label: 'At threshold', count: summary.warn },
+			{ level: 'fail', icon: 'dismiss', label: 'Below target', count: summary.fail },
+		].forEach(function (status) {
+			const badge = document.createElement('span');
+			badge.className = 'summary-badge ' + status.level;
+			badge.appendChild(createIcon(status.icon));
+			badge.appendChild(document.createTextNode(status.label));
+			const count = document.createElement('strong');
+			count.textContent = status.count;
+			badge.appendChild(count);
+			statuses.appendChild(badge);
+		});
+		el.appendChild(statuses);
+		const attentionButton = document.getElementById('next-attention-btn');
+		attentionButton.disabled = !getNextAttentionWeek(lastAttentionWeekKey);
+		attentionButton.title = attentionButton.disabled
+			? 'No warning or below-target windows in the displayed range'
+			: 'Jump to the next warning or below-target window';
 	}
 
 	function updateAll() {
@@ -534,6 +686,7 @@
 		});
 		updateSummary();
 		updateMinimap();
+		syncColumnHeader();
 	}
 
 	// ===== Minimap =====
@@ -547,30 +700,53 @@
 		return 'fail';
 	}
 
+	function getNextAttentionWeek(afterKey) {
+		const candidates = weekSundays.filter(function (sunday) {
+			const status = getWeekWindowStatus(sunday);
+			return status === 'fail' || status === 'warn';
+		});
+		return candidates.find(sunday => toKey(sunday) > afterKey) || candidates[0] || null;
+	}
+
 	function updateMinimap() {
 		const container = document.getElementById('minimap');
 		container.innerHTML = '';
-		weekSundays.forEach(function (sunday, idx) {
-			const seg = document.createElement('div');
+		weekSundays.forEach(function (sunday) {
+			const seg = document.createElement('button');
 			const status = getWeekWindowStatus(sunday);
 			seg.className = 'minimap-segment mm-' + status;
-			if (sameDay(sunday, currentSunday)) seg.classList.add('mm-current');
-			seg.title = formatDateRange(sunday);
+			if (sameDay(sunday, currentSunday)) {
+				seg.classList.add('mm-current');
+				seg.setAttribute('aria-current', 'date');
+			}
+			const statusDescription = ', ' + (status === 'out-of-range' ? 'Not enough data'
+				: status === 'good' ? 'Passing' : status === 'warn' ? 'At threshold' : 'Below target');
+			seg.title = formatDateRange(sunday) + statusDescription;
+			seg.setAttribute('aria-label', 'Jump to ' + formatDateRange(sunday) + ', ' + sunday.getFullYear() + statusDescription);
+			if (status === 'warn' || status === 'fail') {
+				const marker = document.createElement('span');
+				marker.className = 'minimap-marker';
+				marker.setAttribute('aria-hidden', 'true');
+				marker.textContent = status === 'warn' ? '!' : '\u00d7';
+				seg.appendChild(marker);
+			}
 			seg.addEventListener('click', function () {
 				const entry = weekElements.get(toKey(sunday));
 				if (entry)
-					entry.row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+					scrollToWeek(entry.row);
 			});
 			container.appendChild(seg);
 		});
 	}
 
 	// ===== Click Handling =====
-	function handleDayClick(dateKey) {
+	function handleDayClick(dateKey, markMode = state.markMode) {
 		const date = fromKey(dateKey);
 		const currentState = getDayState(date);
 
-		if (state.vacationMode) {
+		if (markMode === 'work-from-home') {
+			state.dayStates[dateKey] = 'work-from-home';
+		} else if (markMode === 'out-of-office') {
 			// Toggle vacation
 			if (currentState === 'vacation') {
 				delete state.dayStates[dateKey];
@@ -580,7 +756,7 @@
 		} else {
 			// Toggle in-office
 			if (currentState === 'in-office') {
-				delete state.dayStates[dateKey];
+				state.dayStates[dateKey] = isWeekend(date) ? 'weekend' : 'default';
 			} else {
 				state.dayStates[dateKey] = 'in-office';
 			}
@@ -589,7 +765,7 @@
 		updateAll();
 	}
 
-	// ===== Drag Handling (vacation mode) =====
+	// ===== Drag Handling =====
 	function getDatesInRange(startKey, endKey) {
 		let startDate = fromKey(startKey);
 		let endDate = fromKey(endKey);
@@ -607,18 +783,27 @@
 		return dates;
 	}
 
+	function applyDayRange(startKey, endKey, mode) {
+		const dayState = mode === 'out-of-office' ? 'vacation' : mode;
+		getDatesInRange(startKey, endKey).forEach(function (key) {
+			state.dayStates[key] = dayState;
+		});
+		saveState();
+		updateAll();
+	}
+
 	function clearDragHighlights() {
 		document
 			.querySelectorAll('.day-cell.drag-highlight')
 			.forEach(function (el) {
-				el.classList.remove('drag-highlight');
+				el.classList.remove('drag-highlight', 'drag-in-office', 'drag-out-of-office', 'drag-work-from-home');
 			});
 	}
 
 	function applyDragHighlights(dateKeys) {
 		dateKeys.forEach(function (key) {
 			const el = document.querySelector('.day-cell[data-date="' + key + '"]');
-			if (el) el.classList.add('drag-highlight');
+			if (el) el.classList.add('drag-highlight', 'drag-' + dragState.mode);
 		});
 	}
 
@@ -630,12 +815,12 @@
 				if (date.getDay() !== dayIndex) continue;
 				var key = toKey(date);
 				if (checked) {
-					// Only set to in-office if not already vacation or a holiday
+					// Let recurrence handle office days and holidays instead of saving bulk overrides.
 					if (
 						state.dayStates[key] !== 'vacation' &&
-						!(state.showHolidays && holidayMap[key])
+						state.dayStates[key] !== 'work-from-home'
 					) {
-						state.dayStates[key] = 'in-office';
+						delete state.dayStates[key];
 					}
 				} else {
 					// Only clear if currently in-office
@@ -647,9 +832,237 @@
 		});
 	}
 
+	function setShowHolidays(showHolidays) {
+		state.showHolidays = showHolidays;
+		for (const [key, dayState] of Object.entries(state.dayStates)) {
+			if (
+				dayState === 'in-office' &&
+				holidayMap[key] &&
+				state.regularDays.includes(fromKey(key).getDay())
+			) {
+				delete state.dayStates[key];
+			}
+		}
+		saveState();
+		updateAll();
+	}
+
 	// ===== Event Wiring =====
 	function init() {
-		loadState();
+		const savedStateStatus = loadState();
+
+		const appInfoDialog = document.getElementById('app-info-dialog');
+		const welcomeDialog = document.getElementById('welcome-dialog');
+		const regularDaysSetting = document.getElementById('regular-days-setting');
+		regularDaysSetting.addEventListener('animationend', handleNavigationHighlightEnd);
+		welcomeDialog.addEventListener('close', function () {
+			document.getElementById('settings-panel').hidden = false;
+			const settingsToggle = document.getElementById('settings-toggle-btn');
+			settingsToggle.classList.add('active');
+			settingsToggle.setAttribute('aria-expanded', 'true');
+			regularDaysSetting.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+			highlightNavigationTarget(regularDaysSetting);
+		});
+		const holidayInfoDialog = document.getElementById('holiday-info-dialog');
+		document.getElementById('holiday-info-btn').addEventListener('click', function () {
+			holidayInfoDialog.querySelector('.dialog-message').hidden = true;
+			holidayInfoDialog.showModal();
+		});
+		document.getElementById('close-holiday-info-btn').addEventListener('click', function () {
+			holidayInfoDialog.close();
+		});
+		document.getElementById('close-welcome-btn').addEventListener('click', function () {
+			welcomeDialog.close();
+		});
+		const clearDataButton = document.getElementById('clear-data-btn');
+		const clearDataConfirmation = document.getElementById('clear-data-confirmation');
+		let clearDataArmed = false;
+		function resetClearDataConfirmation() {
+			clearDataArmed = false;
+			clearDataButton.classList.remove('confirm-clear');
+			clearDataButton.removeAttribute('aria-describedby');
+			clearDataConfirmation.hidden = true;
+		}
+		appInfoDialog.addEventListener('close', resetClearDataConfirmation);
+		clearDataButton.addEventListener('click', function () {
+			if (!clearDataArmed) {
+				clearDataArmed = true;
+				clearDataButton.classList.add('confirm-clear');
+				clearDataButton.setAttribute('aria-describedby', 'clear-data-confirmation');
+				clearDataConfirmation.hidden = false;
+				return;
+			}
+			try {
+				localStorage.removeItem(STORAGE_KEY);
+			} catch (error) {
+				console.error('Unable to clear locally saved planner data.', error);
+				resetClearDataConfirmation();
+				showAppMessage('Unable to clear locally saved data. Your saved plan was not changed. Please try again.', true);
+				return;
+			}
+			window.location.reload();
+		});
+		document.getElementById('app-version').textContent = BELT_APP_INFO.version;
+		const publishedDate = document.getElementById('app-published-date');
+		publishedDate.dateTime = BELT_APP_INFO.publishedDate;
+		publishedDate.textContent = new Date(BELT_APP_INFO.publishedDate + 'T12:00:00')
+			.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+		document.getElementById('app-info-btn').addEventListener('click', function () {
+			resetClearDataConfirmation();
+			document.getElementById('dialog-message').hidden = true;
+			appInfoDialog.showModal();
+		});
+		document.getElementById('close-app-info-btn').addEventListener('click', function () {
+			appInfoDialog.close();
+		});
+		[appInfoDialog, welcomeDialog, holidayInfoDialog].forEach(function (dialog) {
+			dialog.addEventListener('keydown', function (event) {
+				if (event.key === 'Escape') {
+					event.preventDefault();
+					dialog.close();
+				}
+			});
+			dialog.addEventListener('click', function (event) {
+				if (event.target !== dialog) return;
+				const bounds = dialog.getBoundingClientRect();
+				if (
+					event.clientX < bounds.left || event.clientX >= bounds.right ||
+					event.clientY < bounds.top || event.clientY >= bounds.bottom
+				) {
+					dialog.close();
+				}
+			});
+		});
+		document.getElementById('dismiss-app-message-btn').addEventListener('click', function () {
+			document.getElementById('app-message').hidden = true;
+		});
+		document.getElementById('download-save-btn').addEventListener('click', function () {
+			try {
+				const blob = new Blob([createSaveFile()], { type: 'application/json' });
+				const url = URL.createObjectURL(blob);
+				try {
+					const link = document.createElement('a');
+					link.href = url;
+					link.download = 'belt-planner-save-' + toKey(new Date()) + '.json';
+					link.hidden = true;
+					document.body.appendChild(link);
+					try {
+						link.click();
+					} finally {
+						link.remove();
+					}
+				} finally {
+					setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+				}
+			} catch (error) {
+				console.error('Unable to download planner save file.', error);
+				showAppMessage('Unable to download a save file. Please try again.', true);
+			}
+		});
+
+		function isFileDrag(event) {
+			return event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files');
+		}
+		document.addEventListener('dragover', function (event) {
+			if (!isFileDrag(event)) return;
+			event.preventDefault();
+			event.dataTransfer.dropEffect = 'copy';
+		});
+		document.addEventListener('drop', async function (event) {
+			if (!isFileDrag(event)) return;
+			event.preventDefault();
+			if (event.dataTransfer.files.length !== 1) {
+				showAppMessage('Drop one BELT Planner save file at a time.', true);
+				return;
+			}
+			const file = event.dataTransfer.files[0];
+			try {
+				restoreSaveFile(await file.text());
+			} catch (error) {
+				console.error('Unable to restore planner save file.', error);
+				const detail = error instanceof Error ? error.message : 'The file could not be read.';
+				showAppMessage('Unable to load save file: ' + detail + ' Your current plan was not changed.', true);
+				return;
+			}
+			clearDragHighlights();
+			dragState = null;
+			lastAttentionWeekKey = toKey(currentSunday);
+			document.getElementById('days-required').value = state.daysRequired;
+			document.getElementById('weeks-back').value = state.weeksBack;
+			document.getElementById('weeks-forward').value = state.weeksForward;
+			document.getElementById('show-holidays').checked = state.showHolidays;
+			document.querySelectorAll('#regular-days-checkboxes input').forEach(function (checkbox) {
+				checkbox.checked = state.regularDays.includes(Number(checkbox.dataset.day));
+			});
+			renderCalendar();
+			updateSummary();
+			updateMinimap();
+			if (appInfoDialog.open) appInfoDialog.close();
+			if (welcomeDialog.open) welcomeDialog.close();
+			if (holidayInfoDialog.open) holidayInfoDialog.close();
+			showAppMessage('Save file loaded. Data saved locally.');
+		});
+
+		document.querySelectorAll('[data-info-tooltip]').forEach(function (button) {
+			const tooltip = document.getElementById(button.dataset.infoTooltip);
+			let hideTimer;
+			let restoringFocus = false;
+			function positionTooltip() {
+				const anchor = button.getBoundingClientRect();
+				const bounds = tooltip.getBoundingClientRect();
+				tooltip.style.left = Math.max(8, Math.min(anchor.left, window.innerWidth - bounds.width - 8)) + 'px';
+				const top = anchor.bottom + 8 + bounds.height <= window.innerHeight
+					? anchor.bottom + 8 : anchor.top - bounds.height - 8;
+				tooltip.style.top = Math.max(8, top) + 'px';
+			}
+			function showTooltip() {
+				clearTimeout(hideTimer);
+				if (!tooltip.matches(':popover-open')) tooltip.showPopover();
+				positionTooltip();
+			}
+			function scheduleHide() {
+				clearTimeout(hideTimer);
+				hideTimer = setTimeout(function () {
+					if (!button.matches(':hover, :focus') && !tooltip.matches(':hover')) {
+						tooltip.hidePopover();
+					}
+				}, 150);
+			}
+			button.addEventListener('mouseenter', showTooltip);
+			button.addEventListener('focus', function () {
+				if (!restoringFocus) showTooltip();
+			});
+			button.addEventListener('click', showTooltip);
+			button.addEventListener('mouseleave', scheduleHide);
+			button.addEventListener('blur', scheduleHide);
+			tooltip.addEventListener('mouseenter', function () { clearTimeout(hideTimer); });
+			tooltip.addEventListener('mouseleave', scheduleHide);
+			tooltip.addEventListener('beforetoggle', function (event) {
+				if (event.newState === 'closed') {
+					restoringFocus = true;
+					setTimeout(function () { restoringFocus = false; }, 0);
+				}
+			});
+			tooltip.addEventListener('toggle', function () {
+				button.setAttribute('aria-expanded', String(tooltip.matches(':popover-open')));
+			});
+			document.addEventListener('keydown', function (event) {
+				if (event.key === 'Escape' && tooltip.matches(':popover-open')) {
+					tooltip.hidePopover();
+				}
+			});
+			document.addEventListener('pointerdown', function (event) {
+				if (tooltip.matches(':popover-open') &&
+					!button.contains(event.target) && !tooltip.contains(event.target)) {
+					tooltip.hidePopover();
+				}
+			});
+			function repositionOpenTooltip() {
+				if (tooltip.matches(':popover-open')) positionTooltip();
+			}
+			window.addEventListener('resize', repositionOpenTooltip);
+			document.addEventListener('scroll', repositionOpenTooltip, true);
+		});
 
 		// Settings toggle
 		var settingsBtn = document.getElementById('settings-toggle-btn');
@@ -658,9 +1071,19 @@
 			var isHidden = settingsPanel.hidden;
 			settingsPanel.hidden = !isHidden;
 			settingsBtn.classList.toggle('active', isHidden);
-			settingsBtn.textContent = isHidden
-				? 'Settings \u25b4'
-				: 'Settings \u25be';
+			settingsBtn.setAttribute('aria-expanded', String(isHidden));
+		});
+		document.getElementById('today-btn').addEventListener('click', function () {
+			lastAttentionWeekKey = toKey(currentSunday);
+			const current = weekElements.get(toKey(currentSunday));
+			if (current) scrollToWeek(current.row);
+		});
+		document.getElementById('next-attention-btn').addEventListener('click', function () {
+			const next = getNextAttentionWeek(lastAttentionWeekKey);
+			if (next) {
+				lastAttentionWeekKey = toKey(next);
+				scrollToWeek(weekElements.get(lastAttentionWeekKey).row);
+			}
 		});
 
 		const daysInput = document.getElementById('days-required');
@@ -726,67 +1149,74 @@
 		var holidayCb = document.getElementById('show-holidays');
 		holidayCb.checked = state.showHolidays;
 		holidayCb.addEventListener('change', function () {
-			state.showHolidays = holidayCb.checked;
-			saveState();
-			updateAll();
+			setShowHolidays(holidayCb.checked);
 		});
 
 		const modeToggle = document.getElementById('mode-toggle');
-		const inOfficeBtn = modeToggle.querySelector('[data-mode="in-office"]');
-		const outOfOfficeBtn = modeToggle.querySelector(
-			'[data-mode="out-of-office"]',
-		);
-		const cursorDot = document.getElementById('cursor-dot');
+		const modeButtons = modeToggle.querySelectorAll('[data-mode]');
+		const cursorIcon = document.getElementById('cursor-icon');
 
 		function updateModeToggle() {
-			if (state.vacationMode) {
-				inOfficeBtn.classList.remove('active');
-				outOfOfficeBtn.classList.add('active');
-				cursorDot.style.background = '#9b59b6';
-			} else {
-				inOfficeBtn.classList.add('active');
-				outOfOfficeBtn.classList.remove('active');
-				cursorDot.style.background = '#27ae60';
-			}
+			modeButtons.forEach(function (button) {
+				const active = button.dataset.mode === state.markMode;
+				button.setAttribute('aria-pressed', String(active));
+				button.classList.toggle('active', active);
+			});
+			cursorIcon.classList.toggle('out-of-office', state.markMode === 'out-of-office');
+			cursorIcon.classList.toggle('work-from-home', state.markMode === 'work-from-home');
+			cursorIcon.replaceChildren(createIcon(state.markMode === 'in-office' ? 'office'
+				: state.markMode === 'out-of-office' ? 'away' : 'home'));
 		}
 
-		inOfficeBtn.addEventListener('click', function () {
-			state.vacationMode = false;
-			updateModeToggle();
+		modeButtons.forEach(function (button) {
+			button.addEventListener('click', function () {
+				state.markMode = button.dataset.mode;
+				updateModeToggle();
+			});
 		});
+		updateModeToggle();
 
-		outOfOfficeBtn.addEventListener('click', function () {
-			state.vacationMode = true;
-			updateModeToggle();
-		});
-
-		// Cursor dot follows mouse, visible only over day cells
+		// Active tool icon follows the mouse, visible only over day cells.
 		document.addEventListener('mousemove', function (e) {
-			cursorDot.style.left = e.clientX + 'px';
-			cursorDot.style.top = e.clientY + 'px';
+			cursorIcon.style.left = e.clientX + 'px';
+			cursorIcon.style.top = e.clientY + 'px';
 			var overDayCell = e.target.closest('.day-cell') !== null;
-			cursorDot.style.opacity = overDayCell ? '1' : '0';
+			cursorIcon.style.opacity = overDayCell ? '1' : '0';
 		});
 
-		renderCalendar();
+		renderCalendar(false);
 		updateSummary();
 		updateMinimap();
 
 		// Delegate click and drag events on the calendar container
 		const container = document.getElementById('calendar-container');
+		const scroller = document.querySelector('.calendar-scroll');
+		container.addEventListener('animationend', handleNavigationHighlightEnd);
+		scroller.addEventListener('scroll', function () {
+			document.getElementById('calendar-column-header').scrollLeft = scroller.scrollLeft;
+		});
+		const columnHeaderObserver = new ResizeObserver(syncColumnHeader);
+		columnHeaderObserver.observe(container);
+		columnHeaderObserver.observe(scroller);
+
+		container.addEventListener('keydown', function (e) {
+			if (e.key !== 'Enter' && e.key !== ' ') return;
+			if (!e.target.classList.contains('day-cell')) return;
+			e.preventDefault();
+			handleDayClick(e.target.dataset.date);
+		});
 
 		container.addEventListener('mousedown', function (e) {
+			if (e.button !== 0 || e.target.closest('.vacation-edge-btn')) return;
 			const cell = e.target.closest('.day-cell');
 			if (!cell) return;
 			const dateKey = cell.dataset.date;
 			if (!dateKey) return;
 
-			if (state.vacationMode) {
-				dragState = { startDate: dateKey, currentDate: dateKey, active: true };
-				clearDragHighlights();
-				applyDragHighlights([dateKey]);
-				e.preventDefault();
-			}
+			dragState = { startDate: dateKey, currentDate: dateKey, mode: state.markMode, active: true };
+			clearDragHighlights();
+			applyDragHighlights([dateKey]);
+			e.preventDefault();
 		});
 
 		container.addEventListener('mousemove', function (e) {
@@ -802,32 +1232,31 @@
 			applyDragHighlights(range);
 		});
 
-		document.addEventListener('mouseup', function () {
-			if (!dragState || !dragState.active) return;
+		document.addEventListener('mouseup', function (e) {
+			if (e.button !== 0 || !dragState || !dragState.active) return;
 
 			if (dragState.startDate === dragState.currentDate) {
-				// Single click in vacation mode
-				handleDayClick(dragState.startDate);
+				handleDayClick(dragState.startDate, dragState.mode);
 			} else {
-				// Drag range — set all to vacation
-				const range = getDatesInRange(
+				applyDayRange(
 					dragState.startDate,
 					dragState.currentDate,
+					dragState.mode,
 				);
-				range.forEach(function (key) {
-					state.dayStates[key] = 'vacation';
-				});
-				saveState();
-				updateAll();
 			}
 
 			clearDragHighlights();
 			dragState = null;
 		});
 
-		// Normal mode clicks (non-drag)
+		window.addEventListener('blur', function () {
+			clearDragHighlights();
+			dragState = null;
+		});
+
+		// Assistive clicks without mouse events; mouse edits finish on mouseup.
 		container.addEventListener('click', function (e) {
-			if (state.vacationMode) return; // handled by mousedown/mouseup
+			if (e.detail !== 0) return;
 			const cell = e.target.closest('.day-cell');
 			if (!cell) return;
 			// Ignore if click was on an edge button
@@ -836,6 +1265,7 @@
 			if (!dateKey) return;
 			handleDayClick(dateKey);
 		});
+		if (savedStateStatus === 'empty') welcomeDialog.showModal();
 	}
 
 	// Boot

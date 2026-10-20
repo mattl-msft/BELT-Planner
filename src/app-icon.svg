@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+	<title>BELT Planner calendar</title>
+	<style>
+		:root { --cp-brand-start: #007c91; --cp-brand-end: #7654a3; }
+	</style>
+	<defs>
+		<linearGradient id="brand-gradient" gradientUnits="userSpaceOnUse" x1="3" y1="3" x2="29" y2="29">
+			<stop stop-color="var(--cp-brand-start)"/>
+			<stop offset="1" stop-color="var(--cp-brand-end)"/>
+		</linearGradient>
+	</defs>
+	<g fill="none" stroke="url(#brand-gradient)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+		<rect x="3" y="6" width="26" height="23" rx="4"/>
+		<path d="M10 3v6M22 3v6M3 12h26"/>
+		<path d="M8 18h2M15 18h2M22 18h2M8 24h2M15 24h2M22 24h2"/>
+	</g>
+</svg>

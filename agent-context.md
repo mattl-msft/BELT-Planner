@@ -46,7 +46,7 @@ Use this space to keep notes about this project. Future agents will read this wh
   - `state.vacationMode` (boolean) — toggles between normal and vacation click behavior
 - Date helpers: `toKey(date)` / `fromKey(key)` for `YYYY-MM-DD` ↔ `Date` conversion. `getSunday(date)` finds the Sunday of any date's week.
 - Evaluation functions: `evaluateWeek(sunday)` returns `{ inOfficeDays, meets }`. `evaluateWindow(startSunday)` evaluates 12 consecutive weeks starting from that Sunday, returns `{ passingWeeks, meets }`.
-- Rendering: `renderCalendar()` builds the full DOM once (26 weeks back + 26 weeks forward). `updateAll()` efficiently updates every week's info panel and day cell classes without rebuilding DOM.
+- Rendering: `renderCalendar()` builds the full DOM once (12 weeks back + 38 weeks forward by default). `updateAll()` efficiently updates every week's info panel and day cell classes without rebuilding DOM.
 - Persistence: `localStorage` under key `"belt-planner-state"`, saves `daysRequired` and `dayStates` on every change, loaded on init.
 - Vacation drag: mousedown→mousemove→mouseup on day cells in vacation mode. Range is highlighted with `.drag-highlight` class, then all days set to vacation on mouseup.
 - Vacation edge buttons: ◀/▶ buttons appear on hover at the edges of vacation blocks to extend by one day.
