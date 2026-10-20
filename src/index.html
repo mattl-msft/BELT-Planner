@@ -50,6 +50,7 @@
 			</defs>
 		</svg>
 		<div class="app-layout">
+			<button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="Close planner menu" tabindex="-1" hidden></button>
 			<aside class="sidebar" id="sidebar">
 				<div class="app-brand">
 					<img class="app-logo" src="app-icon.svg" alt="" width="28" height="28" />
@@ -117,7 +118,7 @@
 									id="weeks-forward"
 									min="1"
 									max="52"
-									value="38"
+									value="26"
 								/>
 							</label>
 						</div>
@@ -141,8 +142,16 @@
 			</aside>
 			<div class="main-wrapper">
 				<header class="workspace-header">
-					<h1>Calendar</h1>
-					<span class="edit-days-label">Go to:</span>
+					<button class="mobile-menu-button" id="mobile-menu-btn" type="button" aria-label="Open planner menu" aria-expanded="false" aria-controls="sidebar">
+						<img src="app-icon.svg" alt="" width="28" height="28" />
+					</button>
+					<h1><span class="desktop-title">Calendar</span><span class="mobile-title">BELT Planner</span></h1>
+					<div class="mobile-controls-switch" role="group" aria-label="Calendar controls">
+						<button type="button" data-controls="navigation" aria-pressed="false" aria-controls="navigation-controls">Jump to</button>
+						<button type="button" data-controls="tools" aria-pressed="true" aria-controls="editing-controls">Edit days</button>
+					</div>
+					<div class="header-controls navigation-controls" id="navigation-controls" role="group" aria-label="Jump to">
+					<span class="edit-days-label">Jump to:</span>
 					<button class="today-button" id="today-btn">
 						<svg class="icon" aria-hidden="true"><use href="#icon-calendar"/></svg>
 						Today
@@ -151,6 +160,8 @@
 						<svg class="icon" aria-hidden="true"><use href="#icon-warning"/></svg>
 						Next error or warning
 					</button>
+					</div>
+					<div class="header-controls editing-controls" id="editing-controls">
 					<span class="edit-days-label" id="edit-days-label">Edit days:</span>
 					<div class="mode-toggle" id="mode-toggle" role="group" aria-labelledby="edit-days-label" aria-describedby="mark-days-hint">
 						<button class="mode-option in-office" data-mode="in-office" aria-pressed="false">
@@ -165,6 +176,10 @@
 							<svg class="icon" aria-hidden="true"><use href="#icon-home"/></svg>
 							Work from home
 						</button>
+					</div>
+					<button class="info-button" type="button" aria-label="About editing days" aria-describedby="edit-days-help" aria-expanded="false" data-info-tooltip="edit-days-help">
+						<svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>
+					</button>
 					</div>
 					<dialog class="app-dialog" id="app-info-dialog" aria-labelledby="app-info-title">
 						<div class="dialog-heading">
@@ -194,9 +209,6 @@
 							<svg class="icon" aria-hidden="true"><use href="#icon-dismiss"/></svg>
 						</button>
 					</div>
-					<button class="info-button" type="button" aria-label="About editing days" aria-describedby="edit-days-help" aria-expanded="false" data-info-tooltip="edit-days-help">
-						<svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>
-					</button>
 				</header>
 				<div class="calendar-column-header" id="calendar-column-header"></div>
 				<div class="calendar-scroll">
@@ -266,7 +278,7 @@
 		<div class="info-tooltip" id="rolling-window-help" popover="auto" role="tooltip">
 			<h3>Summary</h3>
 			<p><strong>Each week:</strong> The in-office count is compared with your required days per week in Settings (3 by default). A week qualifies when it meets or exceeds that requirement.</p>
-			<p><strong>Each 12-week window:</strong> A row's Window starting here status covers that week plus the following 11 weeks, not the previous weeks. It shows how many weeks qualify out of 12; hover over it for the window's dates. The This week status shows in-office days against the weekly requirement.</p>
+			<p><strong>Each 12-week window:</strong> A row's Window ending here status covers that week and the previous 11 weeks. It shows how many weeks qualify out of 12; hover over it for the window's dates. The first 11 displayed weeks have insufficient history and show Not enough data. The This week status shows in-office days against the weekly requirement.</p>
 			<p><strong>Passing:</strong> 9&ndash;12 qualifying weeks. <strong>At threshold:</strong> exactly 8 (the minimum). <strong>Below target:</strong> fewer than 8.</p>
 		</div>
 		<div class="info-tooltip" id="edit-days-help" popover="auto" role="tooltip">

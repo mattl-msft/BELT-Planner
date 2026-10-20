@@ -32,7 +32,7 @@ writeFileSync(new URL('./src/app-info.js', import.meta.url), appInfo, 'utf8');
 
 const bundled = html
 	.replace(faviconTag, () => faviconTag.replace('app-icon.svg', appIconUrl))
-	.replace(appLogoSource, () => 'src="' + appIconUrl + '"')
+	.replaceAll(appLogoSource, () => 'src="' + appIconUrl + '"')
 	.replace(stylesheetTag, () => `<style>\n${css}\n</style>`)
 	.replace(appInfoTag, () => `<script>\n${appInfo}\n</script>`)
 	.replace(scriptTag, () => `<script>\n${js}\n</script>`);

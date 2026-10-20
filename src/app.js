@@ -25,7 +25,7 @@
 	const state = {
 		daysRequired: 3,
 		weeksBack: 12,
-		weeksForward: 38,
+		weeksForward: 26,
 		// Map<string(YYYY-MM-DD), "in-office"|"vacation"|"work-from-home"|"default"|"weekend">
 		// Absent key = recurring schedule, or unmarked weekday/weekend
 		dayStates: {},
@@ -76,14 +76,14 @@
 		);
 	}
 
-	function formatDateRange(sunday) {
+	function formatDateRange(sunday, monthFormat = 'long') {
 		const sat = addDays(sunday, 6);
 		return (
-			sunday.toLocaleDateString('en-US', { month: 'long' }) +
+			sunday.toLocaleDateString('en-US', { month: monthFormat }) +
 			' ' +
 			sunday.getDate() +
 			' - ' +
-			(sunday.getMonth() === sat.getMonth() ? '' : sat.toLocaleDateString('en-US', { month: 'long' }) + ' ') +
+			(sunday.getMonth() === sat.getMonth() ? '' : sat.toLocaleDateString('en-US', { month: monthFormat }) + ' ') +
 			sat.getDate()
 		);
 	}
@@ -313,10 +313,10 @@
 		};
 	}
 
-	function evaluateWindow(startSunday) {
+	function evaluateWindow(endSunday) {
 		let passing = 0;
 		for (let w = 0; w < WINDOW_SIZE; w++) {
-			const wSunday = addDays(startSunday, w * 7);
+			const wSunday = addDays(endSunday, -w * 7);
 			if (evaluateWeek(wSunday).meets) passing++;
 		}
 		return {
@@ -339,7 +339,7 @@
 
 	// ===== Summary =====
 	function getCompleteWindowSundays(sundays) {
-		return sundays.slice(0, Math.max(0, sundays.length - WINDOW_SIZE + 1));
+		return sundays.slice(WINDOW_SIZE - 1);
 	}
 
 	function computeSummary(sundays) {
@@ -582,6 +582,17 @@
 		}
 	}
 
+	function appendResponsiveText(element, full, compact) {
+		const wide = document.createElement('span');
+		wide.className = 'wide-copy';
+		wide.textContent = full;
+		const short = document.createElement('span');
+		short.className = 'compact-copy';
+		short.textContent = compact;
+		element.appendChild(wide);
+		element.appendChild(short);
+	}
+
 	function updateWeekInfo(sunday, infoEl) {
 		const weekResult = evaluateWeek(sunday);
 		const windowResult = evaluateWindow(sunday);
@@ -590,23 +601,25 @@
 
 		const rangeDiv = document.createElement('div');
 		rangeDiv.className = 'week-date-range';
-		rangeDiv.textContent = formatDateRange(sunday);
+		rangeDiv.title = formatDateRange(sunday) + ', ' + sunday.getFullYear();
+		appendResponsiveText(rangeDiv, formatDateRange(sunday), formatDateRange(sunday, 'short'));
 		infoEl.appendChild(rangeDiv);
 
 		const statuses = document.createElement('div');
 		statuses.className = 'week-statuses';
-		const windowEnd = addDays(sunday, WINDOW_SIZE * 7 - 1);
+		const windowStart = addDays(sunday, -(WINDOW_SIZE - 1) * 7);
+		const windowEnd = addDays(sunday, 6);
 		const windowLevel = getWeekWindowStatus(sunday);
 		[
 			{
-				label: 'This week', count: weekResult.inOfficeDays, total: state.daysRequired,
+				label: 'This week', compactLabel: 'Week', count: weekResult.inOfficeDays, total: state.daysRequired,
 				level: weekResult.meets ? 'good' : 'fail',
 				description: 'In-office days / required days',
 			},
 			{
-				label: 'Window starting here', count: windowResult.passingWeeks, total: WINDOW_SIZE,
+				label: 'Window ending here', compactLabel: 'Window', count: windowResult.passingWeeks, total: WINDOW_SIZE,
 				level: windowLevel,
-				description: 'Qualifying weeks / 12 weeks, ' + sunday.toLocaleDateString()
+				description: 'Qualifying weeks / 12 weeks, ' + windowStart.toLocaleDateString()
 					+ ' to ' + windowEnd.toLocaleDateString(),
 			},
 		].forEach(function (status) {
@@ -620,11 +633,12 @@
 				+ ', ' + status.description);
 			row.appendChild(createIcon(incomplete ? 'question' : status.level === 'good' ? 'check' : status.level === 'warn' ? 'warning' : 'dismiss'));
 			const label = document.createElement('span');
-			label.textContent = status.label + ':';
+			appendResponsiveText(label, status.label + ':', status.compactLabel + ':');
 			row.appendChild(label);
 			const count = document.createElement('span');
 			count.className = 'week-status-count';
-			count.textContent = incomplete ? 'Not enough data' : status.count + ' / ' + status.total;
+			if (incomplete) appendResponsiveText(count, 'Not enough data', 'N/A');
+			else count.textContent = status.count + ' / ' + status.total;
 			row.appendChild(count);
 			statuses.appendChild(row);
 		});
@@ -632,8 +646,6 @@
 	}
 
 	function syncColumnHeader() {
-		document.getElementById('sidebar').style.setProperty('--sidebar-mobile-width',
-			document.querySelector('.app-layout').clientWidth + 'px');
 		const calendar = document.getElementById('calendar-container');
 		const scroller = document.querySelector('.calendar-scroll');
 		const header = document.getElementById('calendar-column-header');
@@ -672,6 +684,25 @@
 			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : behavior,
 		});
 		if (highlight) highlightNavigationTarget(row);
+	}
+
+	function getMonthRanges(sundays) {
+		const ranges = [];
+		sundays.forEach(function (sunday, index) {
+			for (let offset = 0; offset < 7; offset++) {
+				const date = addDays(sunday, offset);
+				if (date.getDate() !== 1) continue;
+				let end = index + 1;
+				while (end < sundays.length) {
+					const saturday = addDays(sundays[end], 6);
+					if (saturday.getMonth() !== date.getMonth() || saturday.getFullYear() !== date.getFullYear()) break;
+					end++;
+				}
+				ranges.push({ start: index, end: end, date: date });
+				break;
+			}
+		});
+		return ranges;
 	}
 
 	function renderCalendar(highlightCurrentWeek = true) {
@@ -718,20 +749,6 @@
 			updateWeekAttention(attention, attentionLevels.get(toKey(sunday)));
 			row.appendChild(attention);
 
-			// Month label column
-			const monthLabel = document.createElement('div');
-			monthLabel.className = 'month-label';
-			var monthText = '';
-			for (var d = 0; d < 7; d++) {
-				var dayDate = addDays(sunday, d);
-				if (dayDate.getDate() === 1) {
-					monthText = dayDate.toLocaleDateString('en-US', { month: 'long' });
-					break;
-				}
-			}
-			monthLabel.textContent = monthText;
-			row.appendChild(monthLabel);
-
 			// Right day cells
 			const daysGrid = document.createElement('div');
 			daysGrid.className = 'week-days';
@@ -755,6 +772,18 @@
 		});
 
 		updateAttentionFlags(attentionLevels);
+		getMonthRanges(weekSundays).forEach(function (range) {
+			const section = document.createElement('div');
+			section.className = 'month-range';
+			section.style.gridRow = (range.start + 1) + ' / ' + (range.end + 1);
+			const label = document.createElement('div');
+			label.className = 'month-label';
+			appendResponsiveText(label, range.date.toLocaleDateString('en-US', { month: 'long' }),
+				range.date.toLocaleDateString('en-US', { month: 'short' }));
+			label.setAttribute('aria-label', range.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+			section.appendChild(label);
+			container.appendChild(section);
+		});
 
 		// Scroll to current week
 		const currentKey = toKey(currentSunday);
@@ -840,9 +869,10 @@
 	}
 
 	function getWeekWindowStatus(sunday) {
+		const firstSunday = weekSundays[0];
 		const lastSunday = weekSundays[weekSundays.length - 1];
-		const windowEndSunday = addDays(sunday, (WINDOW_SIZE - 1) * 7);
-		if (windowEndSunday > lastSunday) return 'out-of-range';
+		const windowStartSunday = addDays(sunday, -(WINDOW_SIZE - 1) * 7);
+		if (!firstSunday || windowStartSunday < firstSunday || sunday > lastSunday) return 'out-of-range';
 		const result = evaluateWindow(sunday);
 		if (result.passingWeeks >= 9) return 'good';
 		if (result.passingWeeks === 8) return 'warn';
@@ -867,7 +897,9 @@
 			const seg = document.createElement('button');
 			const level = attentionLevels.get(toKey(sunday));
 			const attention = getWeekAttentionStatus(level);
-			const status = level === 'good' ? getWeekWindowStatus(sunday) : attention.status;
+			const windowStatus = getWeekWindowStatus(sunday);
+			const status = windowStatus === 'out-of-range' || level === 'good'
+				? windowStatus : attention.status;
 			seg.className = 'minimap-segment mm-' + status;
 			if (sameDay(sunday, currentSunday)) {
 				seg.classList.add('mm-current');
@@ -1011,31 +1043,138 @@
 	}
 
 	// ===== Event Wiring =====
-	function init() {
-		const savedStateStatus = loadState();
+	function setSettingsExpanded(expanded) {
+		document.getElementById('settings-panel').hidden = !expanded;
+		const toggle = document.getElementById('settings-toggle-btn');
+		toggle.classList.toggle('active', expanded);
+		toggle.setAttribute('aria-expanded', String(expanded));
+	}
+
+	function initResponsiveLayout() {
+		const mobile = window.matchMedia('(max-width: 760px)');
+		const narrow = window.matchMedia('(max-width: 1100px)');
+		const compact = window.matchMedia('(max-width: 1400px)');
 		const sidebar = document.getElementById('sidebar');
 		const sidebarToggle = document.getElementById('sidebar-toggle-btn');
+		const menu = document.getElementById('mobile-menu-btn');
+		const backdrop = document.getElementById('sidebar-backdrop');
+		const workspace = document.querySelector('.main-wrapper');
+		const header = document.querySelector('.workspace-header');
+		let desktopCollapsed = false;
+		let narrowCollapsed = true;
+		let drawerOpen = false;
+
+		function updateSidebar() {
+			const collapsed = !mobile.matches && (narrow.matches ? narrowCollapsed : desktopCollapsed);
+			sidebar.classList.toggle('collapsed', collapsed);
+			sidebar.classList.toggle('mobile-open', drawerOpen);
+			sidebar.inert = mobile.matches && !drawerOpen;
+			workspace.inert = drawerOpen;
+			backdrop.hidden = !drawerOpen;
+			menu.setAttribute('aria-expanded', String(drawerOpen));
+			menu.setAttribute('aria-label', drawerOpen ? 'Close planner menu' : 'Open planner menu');
+			sidebarToggle.setAttribute('aria-expanded', String(!collapsed && (!mobile.matches || drawerOpen)));
+			const label = mobile.matches ? 'Close planner menu' : collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+			sidebarToggle.setAttribute('aria-label', label);
+			sidebarToggle.title = label;
+			sidebarToggle.querySelector('use').setAttribute('href',
+				mobile.matches ? '#icon-dismiss' : collapsed ? '#icon-right' : '#icon-left');
+			if (drawerOpen) {
+				sidebar.setAttribute('role', 'dialog');
+				sidebar.setAttribute('aria-modal', 'true');
+				sidebar.setAttribute('aria-label', 'Planner menu');
+			} else {
+				sidebar.removeAttribute('role');
+				sidebar.removeAttribute('aria-modal');
+				sidebar.removeAttribute('aria-label');
+			}
+			syncColumnHeader();
+		}
+
+		function openSidebar() {
+			if (mobile.matches) drawerOpen = true;
+			else if (narrow.matches) narrowCollapsed = false;
+			else desktopCollapsed = false;
+			updateSidebar();
+			if (mobile.matches) sidebarToggle.focus();
+		}
+
+		function closeDrawer(restoreFocus = true) {
+			drawerOpen = false;
+			updateSidebar();
+			if (restoreFocus) menu.focus();
+		}
+
+		menu.addEventListener('click', openSidebar);
+		backdrop.addEventListener('click', () => closeDrawer());
 		sidebarToggle.addEventListener('click', function () {
-			const collapsed = sidebar.classList.toggle('collapsed');
-			sidebar.classList.toggle('expanding', !collapsed);
-			sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
-			sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
-			sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-			sidebarToggle.querySelector('use').setAttribute('href', collapsed ? '#icon-right' : '#icon-left');
+			if (mobile.matches) {
+				closeDrawer();
+				return;
+			}
+			if (narrow.matches) narrowCollapsed = !narrowCollapsed;
+			else desktopCollapsed = !desktopCollapsed;
+			sidebar.classList.toggle('expanding', !(narrow.matches ? narrowCollapsed : desktopCollapsed));
 			const help = document.getElementById('rolling-window-help');
 			if (help.matches(':popover-open')) help.hidePopover();
-			syncColumnHeader();
+			updateSidebar();
 		});
+		document.addEventListener('keydown', function (event) {
+			if (event.defaultPrevented || !drawerOpen || document.querySelector('dialog[open], :popover-open')) return;
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				closeDrawer();
+			} else if (event.key === 'Tab') {
+				const targets = Array.from(sidebar.querySelectorAll('button, input, a[href]'))
+					.filter(element => !element.disabled && element.getClientRects().length);
+				const first = targets[0];
+				const last = targets[targets.length - 1];
+				if (event.shiftKey && document.activeElement === first) {
+					event.preventDefault();
+					last.focus();
+				} else if (!event.shiftKey && document.activeElement === last) {
+					event.preventDefault();
+					first.focus();
+				}
+			}
+		});
+		header.dataset.controls = 'tools';
+		document.querySelectorAll('.mobile-controls-switch [data-controls]').forEach(function (button) {
+			button.addEventListener('click', function () {
+				header.dataset.controls = button.dataset.controls;
+				document.querySelectorAll('.mobile-controls-switch [data-controls]').forEach(function (option) {
+					option.setAttribute('aria-pressed', String(option === button));
+				});
+			});
+		});
+		mobile.addEventListener('change', function () {
+			const wasOpen = drawerOpen;
+			drawerOpen = false;
+			sidebar.classList.remove('expanding');
+			updateSidebar();
+			if (wasOpen) (mobile.matches ? menu : sidebarToggle).focus();
+			else if (mobile.matches && sidebar.contains(document.activeElement)) menu.focus();
+		});
+		narrow.addEventListener('change', updateSidebar);
+		compact.addEventListener('change', function () {
+			setSettingsExpanded(!compact.matches);
+		});
+		setSettingsExpanded(!compact.matches);
+		updateSidebar();
+		return { openSidebar };
+	}
+
+	function init() {
+		const savedStateStatus = loadState();
+		const responsiveLayout = initResponsiveLayout();
 
 		const appInfoDialog = document.getElementById('app-info-dialog');
 		const welcomeDialog = document.getElementById('welcome-dialog');
 		const regularDaysSetting = document.getElementById('regular-days-setting');
 		regularDaysSetting.addEventListener('animationend', handleNavigationHighlightEnd);
 		welcomeDialog.addEventListener('close', function () {
-			document.getElementById('settings-panel').hidden = false;
-			const settingsToggle = document.getElementById('settings-toggle-btn');
-			settingsToggle.classList.add('active');
-			settingsToggle.setAttribute('aria-expanded', 'true');
+			responsiveLayout.openSidebar();
+			setSettingsExpanded(true);
 			regularDaysSetting.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 			highlightNavigationTarget(regularDaysSetting);
 		});
@@ -1240,12 +1379,8 @@
 
 		// Settings toggle
 		var settingsBtn = document.getElementById('settings-toggle-btn');
-		var settingsPanel = document.getElementById('settings-panel');
 		settingsBtn.addEventListener('click', function () {
-			var isHidden = settingsPanel.hidden;
-			settingsPanel.hidden = !isHidden;
-			settingsBtn.classList.toggle('active', isHidden);
-			settingsBtn.setAttribute('aria-expanded', String(isHidden));
+			setSettingsExpanded(document.getElementById('settings-panel').hidden);
 		});
 		document.getElementById('today-btn').addEventListener('click', function () {
 			lastAttentionWeekKey = toKey(currentSunday);
@@ -1373,6 +1508,10 @@
 		const columnHeaderObserver = new ResizeObserver(syncColumnHeader);
 		columnHeaderObserver.observe(container);
 		columnHeaderObserver.observe(scroller);
+		let calendarPointerType = 'mouse';
+		container.addEventListener('pointerdown', function (event) {
+			calendarPointerType = event.pointerType;
+		});
 
 		container.addEventListener('keydown', function (e) {
 			if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -1382,6 +1521,7 @@
 		});
 
 		container.addEventListener('mousedown', function (e) {
+			if (calendarPointerType === 'touch' || (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents)) return;
 			if (e.button !== 0 || e.target.closest('.vacation-edge-btn')) return;
 			const cell = e.target.closest('.day-cell');
 			if (!cell) return;
@@ -1429,9 +1569,10 @@
 			dragState = null;
 		});
 
-		// Assistive clicks without mouse events; mouse edits finish on mouseup.
+		// Touch leaves vertical swipes to the browser; mouse edits finish on mouseup.
 		container.addEventListener('click', function (e) {
-			if (e.detail !== 0) return;
+			if (e.detail !== 0 && e.pointerType !== 'touch' && calendarPointerType !== 'touch' &&
+				!(e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents)) return;
 			const cell = e.target.closest('.day-cell');
 			if (!cell) return;
 			// Ignore if click was on an edge button

@@ -32,13 +32,13 @@ function createPlanner(savedState, environment = {}) {
 	vm.runInContext(appInfoSource, context);
 	vm.runInContext(source.replace('// Boot', `
 		globalThis.planner = {
-			state, getDayState, getWeekSundays, evaluateWeek,
+			state, getDayState, getWeekSundays, evaluateWeek, evaluateWindow, updateWeekInfo,
 			applyRegularDay, setShowHolidays, handleDayClick, saveState, loadState, updateDayCellClass,
 			getCompleteWindowSundays, computeSummary,
 			computeWeekAttention, updateWeekAttention, getWeekAttentionStatus, updateMinimap,
-			getAttentionRanges, updateAttentionFlags,
+			getAttentionRanges, updateAttentionFlags, getMonthRanges,
 			weekElements, updateMinimapViewport,
-			formatDateRange, getWeekWindowStatus,
+			formatDateRange, getWeekWindowStatus, initResponsiveLayout, setSettingsExpanded,
 			applyDayRange,
 			applyDragHighlights, clearDragHighlights,
 			setDragMode: mode => { dragState = { mode }; },
@@ -70,9 +70,162 @@ test('loading distinguishes a first run from saved plans, even when saved settin
 	}).loadStatus, 'loaded');
 });
 
-test('weeks after today default to 38 without overriding saved preferences', () => {
-	assert.equal(createPlanner().state.weeksForward, 38);
-	assert.equal(createPlanner({ weeksForward: 26 }).state.weeksForward, 26);
+test('weeks after today default to 26 without overriding saved preferences', () => {
+	assert.equal(createPlanner().state.weeksForward, 26);
+	assert.equal(createPlanner({ weeksForward: 38 }).state.weeksForward, 38);
+});
+
+function createResponsivePlanner(width) {
+	const nodes = new Map();
+	const media = [];
+	const listeners = {};
+	const document = {
+		activeElement: null,
+		getElementById: id => node(id),
+		querySelector: selector => selector === 'dialog[open], :popover-open' ? null : node(selector),
+		querySelectorAll: () => controls,
+		addEventListener: (name, handler) => { listeners[name] = handler; },
+	};
+	function node(id) {
+		if (!nodes.has(id)) {
+			const classes = new Set();
+			nodes.set(id, {
+				attributes: {}, events: {}, dataset: {}, hidden: false,
+				classList: {
+					toggle(name, value) {
+						const enabled = value ?? !classes.has(name);
+						if (enabled) classes.add(name);
+						else classes.delete(name);
+						return enabled;
+					},
+					remove: name => classes.delete(name),
+					contains: name => classes.has(name),
+				},
+				setAttribute(name, value) { this.attributes[name] = value; },
+				removeAttribute(name) { delete this.attributes[name]; },
+				addEventListener(name, handler) { this.events[name] = handler; },
+				querySelector: selector => selector === '.day-header-row' ? null : node(id + selector),
+				querySelectorAll: () => [node('sidebar-toggle-btn'), node('app-info-btn')],
+				contains: element => element === node('sidebar-toggle-btn') || element === node('app-info-btn'),
+				matches: () => false,
+				focus() { document.activeElement = this; },
+				getClientRects: () => [{}],
+			});
+		}
+		return nodes.get(id);
+	}
+	const controls = ['navigation', 'tools'].map(name => {
+		const button = node('controls-' + name);
+		button.dataset.controls = name;
+		return button;
+	});
+	const planner = createPlanner(undefined, {
+		document,
+		window: {
+			matchMedia(query) {
+				const max = Number(query.match(/\d+/)[0]);
+				const entry = { matches: width <= max, max, addEventListener: (_name, handler) => { entry.change = handler; } };
+				media.push(entry);
+				return entry;
+			},
+		},
+	});
+	const layout = planner.initResponsiveLayout();
+	return {
+		node, document, layout, state: planner.state,
+		key(key, shiftKey = false, defaultPrevented = false) {
+			let prevented = false;
+			listeners.keydown({ key, shiftKey, defaultPrevented, preventDefault() { prevented = true; } });
+			return prevented;
+		},
+		resize(nextWidth) {
+			const changed = media.filter(entry => entry.matches !== (nextWidth <= entry.max));
+			media.forEach(entry => { entry.matches = nextWidth <= entry.max; });
+			changed.forEach(entry => entry.change());
+		},
+	};
+}
+
+test('responsive defaults collapse settings and the narrow rail without losing independent sidebar choices', () => {
+	const ui = createResponsivePlanner(1600);
+	const sidebar = ui.node('sidebar');
+	assert.equal(ui.node('settings-panel').hidden, false);
+	assert.equal(sidebar.classList.contains('collapsed'), false);
+	ui.node('sidebar-toggle-btn').events.click();
+	assert.equal(sidebar.classList.contains('collapsed'), true);
+	ui.resize(1280);
+	assert.equal(ui.node('settings-panel').hidden, true);
+	ui.resize(1000);
+	assert.equal(sidebar.classList.contains('collapsed'), true);
+	ui.node('sidebar-toggle-btn').events.click();
+	assert.equal(sidebar.classList.contains('collapsed'), false);
+	ui.resize(1600);
+	assert.equal(sidebar.classList.contains('collapsed'), true);
+	assert.equal(ui.node('settings-panel').hidden, false);
+	ui.resize(1000);
+	assert.equal(sidebar.classList.contains('collapsed'), false);
+});
+
+test('mobile drawer is inert when closed, modal when open, traps focus and restores it on dismissal', () => {
+	const ui = createResponsivePlanner(390);
+	const sidebar = ui.node('sidebar');
+	const menu = ui.node('mobile-menu-btn');
+	const close = ui.node('sidebar-toggle-btn');
+	assert.equal(sidebar.inert, true);
+	assert.equal(menu.attributes['aria-expanded'], 'false');
+	menu.events.click();
+	assert.equal(sidebar.inert, false);
+	assert.equal(sidebar.attributes['role'], 'dialog');
+	assert.equal(sidebar.attributes['aria-modal'], 'true');
+	assert.equal(ui.node('.main-wrapper').inert, true);
+	assert.equal(ui.node('sidebar-backdrop').hidden, false);
+	assert.equal(ui.document.activeElement, close);
+	assert.equal(ui.key('Tab', true), true);
+	assert.equal(ui.document.activeElement, ui.node('app-info-btn'));
+	assert.equal(ui.key('Tab'), true);
+	assert.equal(ui.document.activeElement, close);
+	assert.equal(ui.key('Escape', false, true), false);
+	assert.equal(sidebar.attributes['aria-modal'], 'true');
+	assert.equal(ui.key('Escape'), true);
+	assert.equal(sidebar.inert, true);
+	assert.equal(sidebar.attributes['aria-modal'], undefined);
+	assert.equal(ui.node('.main-wrapper').inert, false);
+	assert.equal(ui.document.activeElement, menu);
+	for (const dismiss of [() => ui.node('sidebar-backdrop').events.click(), () => close.events.click()]) {
+		menu.events.click();
+		dismiss();
+		assert.equal(menu.attributes['aria-expanded'], 'false');
+		assert.equal(ui.document.activeElement, menu);
+	}
+});
+
+test('resizing an open mobile drawer clears modality and restores usable desktop controls', () => {
+	const ui = createResponsivePlanner(390);
+	ui.layout.openSidebar();
+	ui.resize(1280);
+	assert.equal(ui.node('sidebar').inert, false);
+	assert.equal(ui.node('sidebar').classList.contains('mobile-open'), false);
+	assert.equal(ui.node('sidebar').attributes['aria-modal'], undefined);
+	assert.equal(ui.node('.main-wrapper').inert, false);
+	assert.equal(ui.node('sidebar-backdrop').hidden, true);
+	assert.equal(ui.document.activeElement, ui.node('sidebar-toggle-btn'));
+	ui.resize(390);
+	assert.equal(ui.node('sidebar').inert, true);
+	assert.equal(ui.document.activeElement, ui.node('mobile-menu-btn'));
+});
+
+test('mobile control switch reflects navigation and editing selection without changing the marking tool', () => {
+	const ui = createResponsivePlanner(390);
+	const mode = ui.state.markMode;
+	assert.equal(ui.node('.workspace-header').dataset.controls, 'tools');
+	ui.node('controls-navigation').events.click();
+	assert.equal(ui.node('.workspace-header').dataset.controls, 'navigation');
+	assert.equal(ui.node('controls-navigation').attributes['aria-pressed'], 'true');
+	assert.equal(ui.node('controls-tools').attributes['aria-pressed'], 'false');
+	ui.node('controls-tools').events.click();
+	assert.equal(ui.node('.workspace-header').dataset.controls, 'tools');
+	assert.equal(ui.node('controls-tools').attributes['aria-pressed'], 'true');
+	assert.equal(ui.state.markMode, mode);
 });
 
 test('unreadable local data is reported instead of being treated as a first run', () => {
@@ -450,29 +603,85 @@ test('summary counts only complete windows', () => {
 		assert.equal(visible.length, expected);
 		assert.equal(planner.computeSummary(sundays).total, expected);
 		for (const sunday of visible) {
-			const windowEnd = new Date(sunday);
-			windowEnd.setDate(windowEnd.getDate() + 11 * 7);
-			assert.ok(windowEnd <= sundays.at(-1));
+			const windowStart = new Date(sunday);
+			windowStart.setDate(windowStart.getDate() - 11 * 7);
+			assert.ok(windowStart >= sundays[0]);
 		}
 		if (expected) {
-			assert.equal(visible.at(-1).getTime(), sundays.at(-12).getTime());
+			assert.equal(visible[0].getTime(), sundays[11].getTime());
+			assert.equal(visible.at(-1).getTime(), sundays.at(-1).getTime());
 		}
 	}
 });
 
-test('the final eleven windows have insufficient data, including shorter ranges', () => {
+test('the first eleven windows have insufficient data, including shorter ranges', () => {
 	const planner = createPlanner();
 	for (const [back, forward] of [[12, 26], [1, 10], [1, 1]]) {
 		planner.state.weeksBack = back;
 		planner.state.weeksForward = forward;
 		planner.setWeeks();
 		const sundays = planner.getWeekSundays();
-		const completeCount = Math.max(0, sundays.length - 11);
 		sundays.forEach((sunday, index) => {
-			assert.equal(planner.getWeekWindowStatus(sunday) === 'out-of-range', index >= completeCount);
+			assert.equal(planner.getWeekWindowStatus(sunday) === 'out-of-range', index < 11);
 		});
 		assert.equal(sundays.filter(sunday => planner.getWeekWindowStatus(sunday) === 'out-of-range').length,
 			Math.min(11, sundays.length));
+	}
+});
+
+test('trailing window counts include the ending week and never include subsequent weeks', () => {
+	const { planner, sundays } = attentionPlan([
+		...Array(5).fill(false), ...Array(8).fill(true), false,
+	]);
+	assert.equal(planner.evaluateWindow(sundays[11]).passingWeeks, 7);
+	assert.equal(planner.evaluateWindow(sundays[12]).passingWeeks, 8);
+	assert.equal(planner.evaluateWindow(sundays[13]).passingWeeks, 8);
+	const before = planner.evaluateWindow(sundays[11]).passingWeeks;
+	// Only alter dates after the first window's ending week.
+	sundays.slice(12).forEach(sunday => {
+		const monday = new Date(sunday);
+		monday.setDate(monday.getDate() + 1);
+		const key = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+		planner.state.dayStates[key] = 'vacation';
+	});
+	assert.equal(planner.evaluateWindow(sundays[11]).passingWeeks, before);
+	assert.equal(planner.evaluateWindow(sundays[12]).passingWeeks, 7);
+});
+
+test('week cards label trailing windows and expose their exact Sunday-to-Saturday date bounds', () => {
+	function element() {
+		return {
+			children: [], attributes: {},
+			appendChild(child) { this.children.push(child); },
+			setAttribute(name, value) { this.attributes[name] = value; },
+		};
+	}
+	const planner = createPlanner(undefined, { document: {
+		createElement: element, createElementNS: element,
+	} });
+	planner.state.regularDays = [1, 2, 3];
+	planner.state.showHolidays = false;
+	planner.setWeeks();
+	const sundays = planner.getWeekSundays();
+	for (const index of [0, 10, 11, sundays.length - 1]) {
+		const card = element();
+		planner.updateWeekInfo(sundays[index], card);
+		const row = card.children[1].children[1];
+		const start = new Date(sundays[index]);
+		start.setDate(start.getDate() - 77);
+		const end = new Date(sundays[index]);
+		end.setDate(end.getDate() + 6);
+		assert.equal(row.children[1].children[0].textContent, 'Window ending here:');
+		assert.equal(row.children[1].children[1].textContent, 'Window:');
+		assert.equal(card.children[1].children[0].children[1].children[1].textContent, 'Week:');
+		assert.equal(card.children[0].children[1].textContent, planner.formatDateRange(sundays[index], 'short'));
+		assert.ok(row.title.endsWith(start.toLocaleDateString() + ' to ' + end.toLocaleDateString()));
+		assert.ok(row.attributes['aria-label'].startsWith('Window ending here: '));
+		if (index < 11) {
+			assert.equal(row.children[2].children[0].textContent, 'Not enough data');
+			assert.equal(row.children[2].children[1].textContent, 'N/A');
+			assert.match(row.attributes['aria-label'], /Not enough data/);
+		} else assert.equal(row.children[2].textContent, '12 / 12');
 	}
 });
 
@@ -570,7 +779,7 @@ test('nonqualifying weeks retain warning and error colors regardless of OOF or W
 	}
 });
 
-test('minimap mirrors attention colors across whole ranges, including incomplete forward windows', () => {
+test('minimap shows insufficient history at the top and attention colors through the final week', () => {
 	function element() {
 		return {
 			children: [], attributes: {}, className: '',
@@ -607,11 +816,12 @@ test('minimap mirrors attention colors across whole ranges, including incomplete
 		sundays.forEach((sunday, index) => {
 			const level = levels.get(key(sunday));
 			const attention = planner.getWeekAttentionStatus(level);
-			const status = level === 'good' ? planner.getWeekWindowStatus(sunday) : attention.status;
+			const windowStatus = planner.getWeekWindowStatus(sunday);
+			const status = windowStatus === 'out-of-range' || level === 'good' ? windowStatus : attention.status;
 			const segment = minimap.children[index];
 			assert.ok(segment.className.split(' ').includes('mm-' + status));
 			assert.match(segment.attributes['aria-label'], /^Jump to /);
-			if (level !== 'good') assert.ok(segment.title.includes(attention.description));
+			if (status === 'warn' || status === 'fail') assert.ok(segment.title.includes(attention.description));
 			assert.equal(segment.children.length, status === 'warn' || status === 'fail' ? 1 : 0);
 		});
 		assert.ok(minimap.children[0].className.includes('mm-current'));
@@ -619,18 +829,18 @@ test('minimap mirrors attention colors across whole ranges, including incomplete
 	}
 	checkSegments();
 	assert.ok(minimap.children[19].className.includes('mm-warn'));
-	assert.ok(minimap.children[8].className.includes('mm-warn'));
+	assert.ok(minimap.children.slice(0, 11).every(segment => segment.className.includes('mm-out-of-range')));
 	assert.ok(minimap.children[11].className.includes('mm-warn'));
 	planner.state.dayStates[mondayKey(sundays[7])] = 'work-from-home';
 	checkSegments();
-	assert.ok(minimap.children[0].className.includes('mm-fail'));
-	assert.ok(minimap.children[8].className.includes('mm-fail'));
+	assert.ok(minimap.children[0].className.includes('mm-out-of-range'));
+	assert.ok(minimap.children[8].className.includes('mm-out-of-range'));
 	assert.ok(minimap.children[11].className.includes('mm-fail'));
 	assert.match(minimap.children[11].title, /fewer than 8/);
 	planner.state.dayStates = {};
 	checkSegments();
-	assert.ok(minimap.children[0].className.includes('mm-good'));
-	assert.ok(minimap.children[19].className.includes('mm-out-of-range'));
+	assert.ok(minimap.children[0].className.includes('mm-out-of-range'));
+	assert.ok(minimap.children[19].className.includes('mm-good'));
 	planner.state.weeksForward = 5;
 	planner.setWeeks();
 	planner.updateMinimap();
@@ -767,11 +977,70 @@ test('attention flags span their exact grid rows and refresh without removing ca
 	assert.deepEqual(container.children, [row]);
 });
 
+test('month label ranges start with the first and end with the last full week', () => {
+	const planner = createPlanner();
+	const start = new Date(2026, 0, 1);
+	start.setDate(start.getDate() - start.getDay());
+	const sundays = Array.from({ length: 165 }, (_, index) => {
+		const date = new Date(start);
+		date.setDate(date.getDate() + index * 7);
+		return date;
+	});
+	const ranges = planner.getMonthRanges(sundays);
+	assert.ok(ranges.length >= 36);
+	const startingWeekdays = new Set();
+	const endingWeekdays = new Set();
+	for (const range of ranges) {
+		startingWeekdays.add(range.date.getDay());
+		const lastDay = new Date(range.date.getFullYear(), range.date.getMonth() + 1, 0);
+		endingWeekdays.add(lastDay.getDay());
+		assert.equal(range.date.getDate(), 1);
+		assert.ok(sundays[range.start] <= range.date);
+		const firstSaturday = new Date(sundays[range.start]);
+		firstSaturday.setDate(firstSaturday.getDate() + 6);
+		assert.ok(firstSaturday >= range.date);
+		const lastSunday = sundays[range.end - 1];
+		const lastSaturday = new Date(lastSunday);
+		lastSaturday.setDate(lastSaturday.getDate() + 6);
+		assert.equal(lastSunday.getMonth(), range.date.getMonth());
+		assert.equal(lastSaturday.getMonth(), range.date.getMonth());
+		assert.equal(lastSaturday.getFullYear(), range.date.getFullYear());
+		if (range.end < sundays.length) {
+			const nextSaturday = new Date(sundays[range.end]);
+			nextSaturday.setDate(nextSaturday.getDate() + 6);
+			assert.ok(nextSaturday > lastDay);
+		}
+	}
+	assert.equal(startingWeekdays.size, 7);
+	assert.equal(endingWeekdays.size, 7);
+	assert.ok(ranges.some(range => range.date.getFullYear() === 2028 && range.date.getMonth() === 1));
+});
+
+test('month label ranges respect clipped and empty displayed calendars', () => {
+	const planner = createPlanner();
+	assert.equal(planner.getMonthRanges([]).length, 0);
+	assert.equal(planner.getMonthRanges([new Date(2026, 9, 11)]).length, 0);
+	const sundays = [new Date(2026, 9, 25), new Date(2026, 10, 1), new Date(2026, 10, 8)];
+	const ranges = planner.getMonthRanges(sundays);
+	assert.equal(ranges.length, 1);
+	assert.equal(ranges[0].start, 1);
+	assert.equal(ranges[0].end, 3);
+	assert.equal(ranges[0].date.getMonth(), 10);
+	const single = planner.getMonthRanges([new Date(2026, 8, 27)]);
+	assert.equal(single.length, 1);
+	assert.equal(single[0].start, 0);
+	assert.equal(single[0].end, 1);
+	assert.equal(single[0].date.getMonth(), 9);
+});
+
 test('week ranges omit repeated months and retain month/year boundaries', () => {
 	const planner = createPlanner();
 	assert.equal(planner.formatDateRange(new Date(2026, 7, 16)), 'August 16 - 22');
 	assert.equal(planner.formatDateRange(new Date(2026, 7, 30)), 'August 30 - September 5');
 	assert.equal(planner.formatDateRange(new Date(2026, 11, 27)), 'December 27 - January 2');
+	assert.equal(planner.formatDateRange(new Date(2026, 7, 16), 'short'), 'Aug 16 - 22');
+	assert.equal(planner.formatDateRange(new Date(2026, 7, 30), 'short'), 'Aug 30 - Sep 5');
+	assert.equal(planner.formatDateRange(new Date(2026, 11, 27), 'short'), 'Dec 27 - Jan 2');
 });
 
 test('out-of-office is the default editing tool, including after reload', () => {
@@ -996,14 +1265,15 @@ test('next attention navigation includes failures and warnings, wraps, and skips
 		const key = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 		planner.state.dayStates[key] = 'default';
 	}
-	assert.equal(planner.getWeekWindowStatus(sundays[0]), 'fail');
-	assert.equal(planner.getWeekWindowStatus(sundays[1]), 'warn');
-	assert.equal(planner.getWeekWindowStatus(sundays[2]), 'good');
+	assert.equal(planner.getWeekWindowStatus(sundays[0]), 'out-of-range');
+	assert.equal(planner.getWeekWindowStatus(sundays[11]), 'fail');
+	assert.equal(planner.getWeekWindowStatus(sundays[12]), 'warn');
+	assert.equal(planner.getWeekWindowStatus(sundays[13]), 'good');
 	const key = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-	assert.equal(planner.getNextAttentionWeek('0000-01-01').getTime(), sundays[0].getTime());
-	assert.equal(planner.getNextAttentionWeek(key(sundays[0])).getTime(), sundays[1].getTime());
-	assert.equal(planner.getNextAttentionWeek(key(sundays[1])).getTime(), sundays[0].getTime());
-	assert.equal(planner.getNextAttentionWeek(key(sundays.at(-1))).getTime(), sundays[0].getTime());
+	assert.equal(planner.getNextAttentionWeek('0000-01-01').getTime(), sundays[11].getTime());
+	assert.equal(planner.getNextAttentionWeek(key(sundays[11])).getTime(), sundays[12].getTime());
+	assert.equal(planner.getNextAttentionWeek(key(sundays[12])).getTime(), sundays[11].getTime());
+	assert.equal(planner.getNextAttentionWeek(key(sundays.at(-1))).getTime(), sundays[11].getTime());
 	planner.state.weeksBack = 1;
 	planner.state.weeksForward = 1;
 	planner.setWeeks();
