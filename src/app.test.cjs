@@ -19,7 +19,7 @@ function createPlanner(savedState, environment = {}) {
 			}),
 		},
 		localStorage: {
-			getItem: () => stored,
+			getItem: () => stored ?? null,
 			setItem: (_key, value) => {
 				if (writeError) throw writeError;
 				stored = value;
@@ -44,13 +44,51 @@ function createPlanner(savedState, environment = {}) {
 		return;
 		// Boot
 	`), context);
-	context.planner.loadState();
+	const loadStatus = context.planner.loadState();
 	return {
 		...context.planner,
+		loadStatus,
 		saved: () => JSON.parse(stored),
 		failWrites: error => { writeError = error; },
 	};
 }
+
+test('loading distinguishes a first run from saved plans, even when saved settings are defaults', () => {
+	assert.equal(createPlanner().loadStatus, 'empty');
+	assert.equal(createPlanner({}).loadStatus, 'loaded');
+	assert.equal(createPlanner({
+		daysRequired: 3, weeksBack: 12, weeksForward: 38,
+		regularDays: [], dayStates: {}, showHolidays: true,
+	}).loadStatus, 'loaded');
+});
+
+test('weeks after today default to 38 without overriding saved preferences', () => {
+	assert.equal(createPlanner().state.weeksForward, 38);
+	assert.equal(createPlanner({ weeksForward: 26 }).state.weeksForward, 26);
+});
+
+test('unreadable local data is reported instead of being treated as a first run', () => {
+	for (const getItem of [
+		() => '{invalid JSON',
+		() => { throw new Error('Storage unavailable'); },
+	]) {
+		const messages = [];
+		const nodes = {
+			'app-info-dialog': { open: false },
+			'app-message': { hidden: true, classList: { toggle() {} }, setAttribute() {} },
+			'app-message-text': { textContent: '' },
+		};
+		const planner = createPlanner(undefined, {
+			document: { getElementById: id => nodes[id], querySelector: () => null },
+			localStorage: { getItem },
+			console: { error: (...args) => messages.push(args) },
+		});
+		assert.equal(planner.loadStatus, 'error');
+		assert.equal(messages.length, 1);
+		assert.equal(nodes['app-message'].hidden, false);
+		assert.match(nodes['app-message-text'].textContent, /Unable to load locally saved data/);
+	}
+});
 
 test('automatic week navigation highlights only its destination and restarts on repeated navigation', () => {
 	const highlighted = new Set();
@@ -82,6 +120,24 @@ test('automatic week navigation highlights only its destination and restarts on 
 	assert.equal(layoutReads, 3);
 });
 
+test('initial calendar positioning can skip highlighting without skipping the scroll', () => {
+	let scrollBehavior;
+	let highlighted = false;
+	let layoutReads = 0;
+	const planner = createPlanner(undefined, {
+		document: { querySelectorAll: () => [] },
+		window: { matchMedia: () => ({ matches: false }) },
+	});
+	planner.scrollToWeek({
+		scrollIntoView: options => { scrollBehavior = options.behavior; },
+		classList: { add() { highlighted = true; } },
+		get offsetWidth() { layoutReads++; return 100; },
+	}, 'instant', false);
+	assert.equal(scrollBehavior, 'instant');
+	assert.equal(highlighted, false);
+	assert.equal(layoutReads, 0);
+});
+
 test('automatic week navigation avoids smooth scrolling with reduced motion', () => {
 	let behavior;
 	const planner = createPlanner(undefined, {
@@ -90,7 +146,7 @@ test('automatic week navigation avoids smooth scrolling with reduced motion', ()
 	});
 	planner.scrollToWeek({
 		scrollIntoView: options => { behavior = options.behavior; },
-		classList: { add() {} },
+		classList: { add() {}, remove() {} },
 		offsetWidth: 100,
 	});
 	assert.equal(behavior, 'instant');
@@ -499,6 +555,26 @@ test('save files round-trip all persistent settings and manual markings', () => 
 	assert.equal(reloaded.state.weeksBack, 52);
 	assert.equal(reloaded.state.daysRequired, 4);
 	assert.equal(reloaded.getDayState(new Date(2027, 0, 4)), 'work-from-home');
+});
+
+test('save files retain holiday and regular-day settings without individual day entries', () => {
+	for (const settings of [
+		{ regularDays: [2, 4, 3], showHolidays: false },
+		{ regularDays: [], showHolidays: true },
+		{ regularDays: [0, 6], showHolidays: true },
+	]) {
+		const planner = createPlanner();
+		Object.assign(planner.state, settings);
+		const file = JSON.parse(planner.createSaveFile());
+		assert.deepEqual(file.data.dayStates, {});
+		assert.deepEqual(file.data.regularDays, settings.regularDays);
+		assert.equal(file.data.showHolidays, settings.showHolidays);
+		const restored = createPlanner();
+		restored.restoreSaveFile(JSON.stringify(file));
+		const reloaded = createPlanner(restored.saved());
+		assert.deepEqual(Array.from(reloaded.state.regularDays), settings.regularDays);
+		assert.equal(reloaded.state.showHolidays, settings.showHolidays);
+	}
 });
 
 test('save files omit recurring office entries but retain manual exceptions without mutating the plan', () => {

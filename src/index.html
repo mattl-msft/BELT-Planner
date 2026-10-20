@@ -70,6 +70,18 @@
 						<svg class="icon disclosure-icon" aria-hidden="true"><use href="#icon-chevron"/></svg>
 					</button>
 					<div class="settings-panel" id="settings-panel">
+						<div class="settings-row" id="regular-days-setting">
+							<span class="settings-label">Regular in-office days:</span>
+							<div class="regular-days-checkboxes" id="regular-days-checkboxes">
+								<label><input type="checkbox" data-day="0" /> Sun</label>
+								<label><input type="checkbox" data-day="1" /> Mon</label>
+								<label><input type="checkbox" data-day="2" /> Tue</label>
+								<label><input type="checkbox" data-day="3" /> Wed</label>
+								<label><input type="checkbox" data-day="4" /> Thu</label>
+								<label><input type="checkbox" data-day="5" /> Fri</label>
+								<label><input type="checkbox" data-day="6" /> Sat</label>
+							</div>
+						</div>
 						<div class="settings-row">
 							<label>
 								Days required per week:
@@ -102,7 +114,7 @@
 									id="weeks-forward"
 									min="1"
 									max="52"
-									value="26"
+									value="38"
 								/>
 							</label>
 						</div>
@@ -111,18 +123,9 @@
 								<input type="checkbox" id="show-holidays" />
 								Show Microsoft company holidays
 							</label>
-						</div>
-						<div class="settings-row">
-							<span class="settings-label">Regular in-office days:</span>
-							<div class="regular-days-checkboxes" id="regular-days-checkboxes">
-								<label><input type="checkbox" data-day="0" /> Sun</label>
-								<label><input type="checkbox" data-day="1" /> Mon</label>
-								<label><input type="checkbox" data-day="2" /> Tue</label>
-								<label><input type="checkbox" data-day="3" /> Wed</label>
-								<label><input type="checkbox" data-day="4" /> Thu</label>
-								<label><input type="checkbox" data-day="5" /> Fri</label>
-								<label><input type="checkbox" data-day="6" /> Sat</label>
-							</div>
+							<button class="info-button" id="holiday-info-btn" type="button" aria-label="About company holiday regions" aria-haspopup="dialog" aria-controls="holiday-info-dialog">
+								<svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>
+							</button>
 						</div>
 					</div>
 				</div>
@@ -173,7 +176,13 @@
 						</dl>
 						<p>For questions or comments, get in touch with <a href="mailto:mattl@microsoft.com">mattl</a>.</p>
 						<p>App data is saved locally on your machine via Local Storage. To save a more permanent copy, download a save file. You can drag+drop a save file anywhere on the app to load it.</p>
-						<button class="today-button" id="download-save-btn" type="button">Download save file</button>
+						<div class="dialog-actions">
+							<button class="today-button" id="download-save-btn" type="button">Download save file</button>
+							<div class="clear-data-actions">
+								<span id="clear-data-confirmation" role="status" hidden>Are you sure?</span>
+								<button class="today-button" id="clear-data-btn" type="button">Clear all locally saved data</button>
+							</div>
+						</div>
 						<p id="dialog-message" class="dialog-message" role="alert" hidden></p>
 					</dialog>
 					<div class="app-message" id="app-message" role="status" hidden>
@@ -193,6 +202,64 @@
 				</div>
 			</div>
 		</div>
+		<dialog class="app-dialog" id="holiday-info-dialog" aria-labelledby="holiday-info-title" aria-describedby="holiday-info-description">
+			<div class="dialog-heading">
+				<h2 id="holiday-info-title">Company holidays</h2>
+				<button class="info-button" id="close-holiday-info-btn" type="button" aria-label="Close company holiday information" autofocus>
+					<svg class="icon" aria-hidden="true"><use href="#icon-dismiss"/></svg>
+				</button>
+			</div>
+			<p id="holiday-info-description">Currently, only United States (1010) holidays are included. We're working on adding support for all regions.</p>
+			<p class="dialog-message" role="alert" hidden></p>
+		</dialog>
+		<dialog class="app-dialog" id="welcome-dialog" aria-labelledby="welcome-title" aria-describedby="welcome-intro">
+			<div class="dialog-heading">
+				<h2 id="welcome-title">Welcome!</h2>
+				<button class="info-button" id="close-welcome-btn" type="button" aria-label="Close Welcome dialog" autofocus>
+					<svg class="icon" aria-hidden="true"><use href="#icon-dismiss"/></svg>
+				</button>
+			</div>
+			<p id="welcome-intro">Weekdays start as <strong>Work from home</strong>, so your weeks will initially show as below target (red) until you add office days.</p>
+			<div class="welcome-step">
+				<svg class="welcome-illustration" viewBox="0 0 72 56" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+					<rect x="3" y="8" width="66" height="44" rx="4"/>
+					<path d="M19 4v9M53 4v9M3 21h66"/>
+					<g class="illustration-muted">
+						<rect x="9" y="30" width="8" height="12" rx="2"/>
+						<rect x="55" y="30" width="8" height="12" rx="2"/>
+					</g>
+					<g class="illustration-fill">
+						<rect x="20" y="30" width="8" height="12" rx="2"/>
+						<rect x="32" y="30" width="8" height="12" rx="2"/>
+						<rect x="44" y="30" width="8" height="12" rx="2"/>
+					</g>
+					<path d="m22 36 2 2 2-4m8 2 2 2 2-4m8 2 2 2 2-4"/>
+				</svg>
+				<p><strong>Set your regular in-office days.</strong> Start with the <strong>Regular in-office days</strong> section in Settings. Choose your usual office weekdays to build a base schedule.</p>
+			</div>
+			<div class="welcome-step">
+				<svg class="welcome-illustration" viewBox="0 0 72 56" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+					<rect x="3" y="9" width="66" height="33" rx="4" stroke-dasharray="3 3"/>
+					<g class="illustration-fill">
+						<rect x="8" y="14" width="15" height="23" rx="2"/>
+						<rect x="28" y="14" width="15" height="23" rx="2"/>
+						<rect x="48" y="14" width="15" height="23" rx="2"/>
+					</g>
+					<path d="M10 49h48m-5-4 5 4-5 4"/>
+					<path class="illustration-cursor" d="M54 25v21l6-6 8 1Z"/>
+				</svg>
+				<p><strong>Adjust individual days or a date range.</strong> At the top you can choose an <strong>Edit days</strong> tool to click-toggle individual days, or drag from a start day to an ending day to mark a time span of multiple days.</p>
+			</div>
+			<div class="welcome-step">
+				<svg class="welcome-illustration" viewBox="0 0 72 56" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+					<path class="illustration-fill" d="M19 14h17l5 5v21H19Z"/>
+					<path d="M24 14v8h11v-8M24 40V30h12v10M32 17v3"/>
+					<path d="M60 25v21m-6-6 6 6 6-6M52 49v4h16v-4"/>
+				</svg>
+				<p><strong>Changes are saved automatically</strong> using your browser's Local Storage. You can also export a save file from the Info Dialog, accessible from the info icon in the lower left.</p>
+			</div>
+			<p id="welcome-message" class="dialog-message" role="alert" hidden></p>
+		</dialog>
 		<div class="info-tooltip" id="rolling-window-help" popover="auto" role="tooltip">
 			<h3>Rolling window overview</h3>
 			<p><strong>Each week:</strong> The in-office count is compared with your required days per week in Settings (3 by default). A week qualifies when it meets or exceeds that requirement.</p>

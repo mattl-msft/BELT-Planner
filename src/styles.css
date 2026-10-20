@@ -142,6 +142,8 @@ h3 { font-size: 14px; line-height: 20px; font-weight: 600; }
 .settings-panel { display: flex; flex-direction: column; gap: 16px; padding: 8px 4px 4px; }
 .settings-panel[hidden] { display: none; }
 .settings-row { display: flex; flex-direction: column; gap: 8px; }
+.settings-row.holiday-toggle { flex-direction: row; align-items: center; gap: 4px; }
+#regular-days-setting { position: relative; isolation: isolate; }
 .settings-row label { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
 .settings-row input[type='number'] {
 	width: 56px;
@@ -168,6 +170,19 @@ input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--cp-accen
 .app-dialog p { margin-bottom: 16px; }
 .app-dialog a { color: var(--cp-accent); }
 .app-dialog .dialog-message { margin-top: 16px; margin-bottom: 0; color: var(--cp-danger); }
+#welcome-dialog { width: 640px; padding: 48px; }
+#welcome-title { font-size: 24px; line-height: 28px; font-weight: 400; background: linear-gradient(90deg, var(--cp-brand-start), var(--cp-brand-end)); background-clip: text; color: transparent; }
+.welcome-step { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 16px; margin-bottom: 32px; }
+.welcome-step:last-of-type { margin-bottom: 0; }
+.welcome-step p { margin-bottom: 0; }
+.welcome-step p > strong:first-child { background: linear-gradient(90deg, var(--cp-brand-start), var(--cp-brand-end)); background-clip: text; color: transparent; }
+.welcome-illustration { width: 72px; height: 56px; color: var(--cp-brand-start); }
+.welcome-illustration .illustration-muted { stroke: var(--cp-border-strong); }
+.welcome-illustration .illustration-fill { fill: var(--cp-office-soft); }
+.welcome-illustration .illustration-cursor { fill: var(--cp-surface); }
+.dialog-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+.clear-data-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+#clear-data-confirmation { font-size: 11px; color: var(--cp-danger); }
 .app-message { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px); padding: 12px 16px; border: 1px solid var(--cp-border); border-radius: 8px; background: var(--cp-surface); color: var(--cp-text); box-shadow: var(--cp-shadow); font-size: 12px; }
 .app-message[hidden] { display: none; }
 .app-message.error { border-color: var(--cp-danger); }
@@ -192,6 +207,7 @@ input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--cp-accen
 }
 .today-button:hover:not(:disabled) { background: var(--cp-surface-soft); }
 .today-button:disabled { color: var(--cp-text-soft); cursor: default; }
+.today-button.confirm-clear, .today-button.confirm-clear:hover:not(:disabled) { background: var(--cp-danger); border-color: var(--cp-danger); color: var(--cp-accent-fg); }
 .calendar-legend { display: flex; flex-wrap: wrap; gap: 12px 16px; font-size: 12px; color: var(--cp-text-muted); }
 .calendar-legend span { display: flex; align-items: center; gap: 6px; }
 .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
@@ -236,7 +252,7 @@ main {
 	margin-bottom: 8px;
 	min-height: var(--week-min-height);
 }
-.week-row.navigation-highlight::after {
+.week-row.navigation-highlight::after, #regular-days-setting.navigation-highlight::after {
 	content: '';
 	position: absolute;
 	inset: -4px -12px;
@@ -248,6 +264,7 @@ main {
 	background-position: 50% 0;
 	animation: week-navigation-highlight 1.6s ease-out both;
 }
+#regular-days-setting.navigation-highlight::after { inset: -8px; }
 @keyframes week-navigation-highlight {
 	0% { opacity: 0; background-position: 150% 0; }
 	15%, 65% { opacity: 1; }
@@ -356,9 +373,15 @@ main {
 }
 @media (prefers-reduced-motion: reduce) {
 	*, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
-	.week-row.navigation-highlight::after { animation-name: week-navigation-highlight-fade; }
+	.week-row.navigation-highlight::after, #regular-days-setting.navigation-highlight::after { animation-name: week-navigation-highlight-fade; }
+}
+@media (max-width: 480px) {
+	#welcome-dialog { padding: 24px; }
+	.welcome-step { grid-template-columns: 48px minmax(0, 1fr); gap: 12px; }
+	.welcome-illustration { width: 48px; height: auto; }
 }
 @media (forced-colors: active) {
+	#welcome-title, .welcome-step p > strong:first-child { background: none; color: var(--cp-text); }
 	.app-brand h2 { color: var(--cp-text); }
 	.day-cell, .mode-option.active, .summary-badge { border: 1px solid; }
 	.legend-dot, .minimap-segment { border: 1px solid; }

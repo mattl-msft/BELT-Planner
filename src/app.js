@@ -25,7 +25,7 @@
 	const state = {
 		daysRequired: 3,
 		weeksBack: 12,
-		weeksForward: 26,
+		weeksForward: 38,
 		// Map<string(YYYY-MM-DD), "in-office"|"vacation"|"work-from-home"|"default"|"weekend">
 		// Absent key = recurring schedule, or unmarked weekday/weekend
 		dayStates: {},
@@ -154,8 +154,9 @@
 	}
 
 	function showAppMessage(message, isError = false) {
-		const dialogMessage = document.getElementById('dialog-message');
-		if (isError && document.getElementById('app-info-dialog').open) {
+		const dialog = document.querySelector('.app-dialog[open]');
+		if (isError && dialog) {
+			const dialogMessage = dialog.querySelector('.dialog-message');
 			dialogMessage.textContent = message;
 			dialogMessage.hidden = false;
 			return;
@@ -238,7 +239,7 @@
 	function loadState() {
 		try {
 			const raw = localStorage.getItem(STORAGE_KEY);
-			if (!raw) return;
+			if (raw === null) return 'empty';
 			const data = JSON.parse(raw);
 			if (typeof data.daysRequired === 'number') {
 				state.daysRequired = data.daysRequired;
@@ -258,8 +259,11 @@
 			if (typeof data.weeksForward === 'number') {
 				state.weeksForward = data.weeksForward;
 			}
+			return 'loaded';
 		} catch (e) {
-			/* corrupted data — start fresh */
+			console.error('Unable to load locally saved planner data.', e);
+			showAppMessage('Unable to load locally saved data. Restore a save file, or clear local data from the app info dialog.', true);
+			return 'error';
 		}
 	}
 
@@ -539,7 +543,20 @@
 		header.scrollLeft = scroller.scrollLeft;
 	}
 
-	function scrollToWeek(row, behavior = 'smooth') {
+	function highlightNavigationTarget(element) {
+		element.classList.remove('navigation-highlight');
+		// Flush the removed class so repeated navigation restarts the animation.
+		void element.offsetWidth;
+		element.classList.add('navigation-highlight');
+	}
+
+	function handleNavigationHighlightEnd(event) {
+		if (event.animationName === 'week-navigation-highlight' || event.animationName === 'week-navigation-highlight-fade') {
+			event.target.classList.remove('navigation-highlight');
+		}
+	}
+
+	function scrollToWeek(row, behavior = 'smooth', highlight = true) {
 		document.querySelectorAll('.week-row.navigation-highlight').forEach(function (highlighted) {
 			highlighted.classList.remove('navigation-highlight');
 		});
@@ -547,12 +564,10 @@
 			block: 'center',
 			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : behavior,
 		});
-		// Flush the removed class so repeated navigation to the same row restarts the animation.
-		void row.offsetWidth;
-		row.classList.add('navigation-highlight');
+		if (highlight) highlightNavigationTarget(row);
 	}
 
-	function renderCalendar() {
+	function renderCalendar(highlightCurrentWeek = true) {
 		weekSundays = getWeekSundays();
 		const container = document.getElementById('calendar-container');
 		container.innerHTML = '';
@@ -628,7 +643,7 @@
 		const currentKey = toKey(currentSunday);
 		const current = weekElements.get(currentKey);
 		if (current) {
-			scrollToWeek(current.row, 'instant');
+			scrollToWeek(current.row, 'instant', highlightCurrentWeek);
 		}
 		syncColumnHeader();
 	}
@@ -834,26 +849,89 @@
 
 	// ===== Event Wiring =====
 	function init() {
-		loadState();
+		const savedStateStatus = loadState();
 
 		const appInfoDialog = document.getElementById('app-info-dialog');
+		const welcomeDialog = document.getElementById('welcome-dialog');
+		const regularDaysSetting = document.getElementById('regular-days-setting');
+		regularDaysSetting.addEventListener('animationend', handleNavigationHighlightEnd);
+		welcomeDialog.addEventListener('close', function () {
+			document.getElementById('settings-panel').hidden = false;
+			const settingsToggle = document.getElementById('settings-toggle-btn');
+			settingsToggle.classList.add('active');
+			settingsToggle.setAttribute('aria-expanded', 'true');
+			regularDaysSetting.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+			highlightNavigationTarget(regularDaysSetting);
+		});
+		const holidayInfoDialog = document.getElementById('holiday-info-dialog');
+		document.getElementById('holiday-info-btn').addEventListener('click', function () {
+			holidayInfoDialog.querySelector('.dialog-message').hidden = true;
+			holidayInfoDialog.showModal();
+		});
+		document.getElementById('close-holiday-info-btn').addEventListener('click', function () {
+			holidayInfoDialog.close();
+		});
+		document.getElementById('close-welcome-btn').addEventListener('click', function () {
+			welcomeDialog.close();
+		});
+		const clearDataButton = document.getElementById('clear-data-btn');
+		const clearDataConfirmation = document.getElementById('clear-data-confirmation');
+		let clearDataArmed = false;
+		function resetClearDataConfirmation() {
+			clearDataArmed = false;
+			clearDataButton.classList.remove('confirm-clear');
+			clearDataButton.removeAttribute('aria-describedby');
+			clearDataConfirmation.hidden = true;
+		}
+		appInfoDialog.addEventListener('close', resetClearDataConfirmation);
+		clearDataButton.addEventListener('click', function () {
+			if (!clearDataArmed) {
+				clearDataArmed = true;
+				clearDataButton.classList.add('confirm-clear');
+				clearDataButton.setAttribute('aria-describedby', 'clear-data-confirmation');
+				clearDataConfirmation.hidden = false;
+				return;
+			}
+			try {
+				localStorage.removeItem(STORAGE_KEY);
+			} catch (error) {
+				console.error('Unable to clear locally saved planner data.', error);
+				resetClearDataConfirmation();
+				showAppMessage('Unable to clear locally saved data. Your saved plan was not changed. Please try again.', true);
+				return;
+			}
+			window.location.reload();
+		});
 		document.getElementById('app-version').textContent = BELT_APP_INFO.version;
 		const publishedDate = document.getElementById('app-published-date');
 		publishedDate.dateTime = BELT_APP_INFO.publishedDate;
 		publishedDate.textContent = new Date(BELT_APP_INFO.publishedDate + 'T12:00:00')
 			.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 		document.getElementById('app-info-btn').addEventListener('click', function () {
+			resetClearDataConfirmation();
 			document.getElementById('dialog-message').hidden = true;
 			appInfoDialog.showModal();
 		});
 		document.getElementById('close-app-info-btn').addEventListener('click', function () {
 			appInfoDialog.close();
 		});
-		appInfoDialog.addEventListener('keydown', function (event) {
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				appInfoDialog.close();
-			}
+		[appInfoDialog, welcomeDialog, holidayInfoDialog].forEach(function (dialog) {
+			dialog.addEventListener('keydown', function (event) {
+				if (event.key === 'Escape') {
+					event.preventDefault();
+					dialog.close();
+				}
+			});
+			dialog.addEventListener('click', function (event) {
+				if (event.target !== dialog) return;
+				const bounds = dialog.getBoundingClientRect();
+				if (
+					event.clientX < bounds.left || event.clientX >= bounds.right ||
+					event.clientY < bounds.top || event.clientY >= bounds.bottom
+				) {
+					dialog.close();
+				}
+			});
 		});
 		document.getElementById('dismiss-app-message-btn').addEventListener('click', function () {
 			document.getElementById('app-message').hidden = true;
@@ -920,6 +998,8 @@
 			updateSummary();
 			updateMinimap();
 			if (appInfoDialog.open) appInfoDialog.close();
+			if (welcomeDialog.open) welcomeDialog.close();
+			if (holidayInfoDialog.open) holidayInfoDialog.close();
 			showAppMessage('Save file loaded. Data saved locally.');
 		});
 
@@ -1104,18 +1184,14 @@
 			cursorIcon.style.opacity = overDayCell ? '1' : '0';
 		});
 
-		renderCalendar();
+		renderCalendar(false);
 		updateSummary();
 		updateMinimap();
 
 		// Delegate click and drag events on the calendar container
 		const container = document.getElementById('calendar-container');
 		const scroller = document.querySelector('.calendar-scroll');
-		container.addEventListener('animationend', function (e) {
-			if (e.animationName === 'week-navigation-highlight' || e.animationName === 'week-navigation-highlight-fade') {
-				e.target.classList.remove('navigation-highlight');
-			}
-		});
+		container.addEventListener('animationend', handleNavigationHighlightEnd);
 		scroller.addEventListener('scroll', function () {
 			document.getElementById('calendar-column-header').scrollLeft = scroller.scrollLeft;
 		});
@@ -1189,6 +1265,7 @@
 			if (!dateKey) return;
 			handleDayClick(dateKey);
 		});
+		if (savedStateStatus === 'empty') welcomeDialog.showModal();
 	}
 
 	// Boot
