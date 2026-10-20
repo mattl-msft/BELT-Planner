@@ -54,10 +54,13 @@
 				<div class="app-brand">
 					<img class="app-logo" src="app-icon.svg" alt="" width="28" height="28" />
 					<h2>BELT Planner</h2>
+					<button class="info-button sidebar-toggle" id="sidebar-toggle-btn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar" aria-expanded="true" aria-controls="sidebar">
+						<svg class="icon" aria-hidden="true"><use href="#icon-left"/></svg>
+					</button>
 				</div>
 				<div class="sidebar-summary" id="summary">
 					<div class="summary-heading">
-						<h3>Rolling window overview</h3>
+						<h3>Summary</h3>
 						<button class="info-button" type="button" aria-label="About rolling window evaluation" aria-describedby="rolling-window-help" aria-expanded="false" data-info-tooltip="rolling-window-help">
 							<svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>
 						</button>
@@ -73,13 +76,13 @@
 						<div class="settings-row" id="regular-days-setting">
 							<span class="settings-label">Regular in-office days:</span>
 							<div class="regular-days-checkboxes" id="regular-days-checkboxes">
-								<label><input type="checkbox" data-day="0" /> Sun</label>
 								<label><input type="checkbox" data-day="1" /> Mon</label>
 								<label><input type="checkbox" data-day="2" /> Tue</label>
 								<label><input type="checkbox" data-day="3" /> Wed</label>
 								<label><input type="checkbox" data-day="4" /> Thu</label>
 								<label><input type="checkbox" data-day="5" /> Fri</label>
 								<label><input type="checkbox" data-day="6" /> Sat</label>
+								<label><input type="checkbox" data-day="0" /> Sun</label>
 							</div>
 						</div>
 						<div class="settings-row">
@@ -209,7 +212,7 @@
 					<svg class="icon" aria-hidden="true"><use href="#icon-dismiss"/></svg>
 				</button>
 			</div>
-			<p id="holiday-info-description">Currently, only United States (1010) holidays are included. We're working on adding support for all regions.</p>
+			<p id="holiday-info-description">Currently, BELT only applies to the Puget Sound area and their return to office rules. Therefore, only the United States (1010) holidays are included. If more regions implement BELT / RTO rules, more holiday options will be added.</p>
 			<p class="dialog-message" role="alert" hidden></p>
 		</dialog>
 		<dialog class="app-dialog" id="welcome-dialog" aria-labelledby="welcome-title" aria-describedby="welcome-intro">
@@ -261,14 +264,17 @@
 			<p id="welcome-message" class="dialog-message" role="alert" hidden></p>
 		</dialog>
 		<div class="info-tooltip" id="rolling-window-help" popover="auto" role="tooltip">
-			<h3>Rolling window overview</h3>
+			<h3>Summary</h3>
 			<p><strong>Each week:</strong> The in-office count is compared with your required days per week in Settings (3 by default). A week qualifies when it meets or exceeds that requirement.</p>
-			<p><strong>Each 12-week window:</strong> A row's Window status covers that week plus the following 11 weeks, not the previous weeks. It shows how many weeks qualify out of 12; hover over it for the window's dates. The Week status shows in-office days against the weekly requirement.</p>
-			<p><strong>Status:</strong> 9&ndash;12 qualifying weeks are Passing; exactly 8 are Warning (the minimum is met); fewer than 8 are Failing. The final 11 weeks do not have a complete forward window: their Window status shows a question mark and Not enough data, and their minimap segments are gray. They are excluded from the overview totals, but their individual Week status is still evaluated. Increase the range in Settings to evaluate more windows. If fewer than 12 weeks are configured, all windows have insufficient data.</p>
+			<p><strong>Each 12-week window:</strong> A row's Window starting here status covers that week plus the following 11 weeks, not the previous weeks. It shows how many weeks qualify out of 12; hover over it for the window's dates. The This week status shows in-office days against the weekly requirement.</p>
+			<p><strong>Passing:</strong> 9&ndash;12 qualifying weeks. <strong>At threshold:</strong> exactly 8 (the minimum). <strong>Below target:</strong> fewer than 8.</p>
 		</div>
 		<div class="info-tooltip" id="edit-days-help" popover="auto" role="tooltip">
 			<h3>Edit days</h3>
-			<p id="mark-days-hint">Select a day to mark it. Click and drag to mark a range with any editing tool: In office, Out of office, or Work from home.</p>
+			<ul id="mark-days-hint">
+				<li>Choose a tool; click or drag to mark days.</li>
+				<li>To toggle a day back to it's resting state, use the same tool again on that day</li>
+			</ul>
 			<div class="calendar-legend" aria-label="Calendar legend">
 				<span><i class="legend-dot office"></i>In office</span>
 				<span><i class="legend-dot away"></i>Out of office</span>

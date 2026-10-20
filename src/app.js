@@ -153,7 +153,17 @@
 		};
 	}
 
+	let appMessageTimer;
+
+	function hideAppMessage() {
+		clearTimeout(appMessageTimer);
+		appMessageTimer = undefined;
+		document.getElementById('app-message').hidden = true;
+	}
+
 	function showAppMessage(message, isError = false) {
+		clearTimeout(appMessageTimer);
+		appMessageTimer = undefined;
 		const dialog = document.querySelector('.app-dialog[open]');
 		if (isError && dialog) {
 			const dialogMessage = dialog.querySelector('.dialog-message');
@@ -166,6 +176,9 @@
 		notification.classList.toggle('error', isError);
 		notification.setAttribute('role', isError ? 'alert' : 'status');
 		notification.hidden = false;
+		if (!isError) {
+			appMessageTimer = setTimeout(hideAppMessage, 3000);
+		}
 	}
 
 	function saveState() {
@@ -270,6 +283,9 @@
 	// ===== Evaluation =====
 	function getDayState(date) {
 		const key = toKey(date);
+		if (state.dayStates[key] === 'vacation' && state.showHolidays && holidayMap[key]) {
+			return getScheduledDayState(date);
+		}
 		if (state.dayStates[key]) return state.dayStates[key];
 		return getScheduledDayState(date);
 	}
@@ -341,6 +357,92 @@
 		return { total, pass, warn, fail };
 	}
 
+	function computeWeekAttention(sundays) {
+		const qualifying = sundays.map(sunday => evaluateWeek(sunday).meets);
+		const levels = sundays.map(() => 'good');
+		for (let start = 0; start <= sundays.length - WINDOW_SIZE; start++) {
+			const passing = qualifying.slice(start, start + WINDOW_SIZE).filter(Boolean).length;
+			if (passing > WINDOW_PASS_THRESHOLD) continue;
+			for (let index = start; index < start + WINDOW_SIZE; index++) {
+				if (passing < WINDOW_PASS_THRESHOLD) levels[index] = 'fail';
+				else if (levels[index] !== 'fail') levels[index] = 'warn';
+			}
+		}
+		return new Map(sundays.map((sunday, index) => [toKey(sunday), levels[index]]));
+	}
+
+	function getAttentionRanges(sundays, attentionLevels) {
+		const ranges = [];
+		sundays.forEach(function (sunday, index) {
+			const level = attentionLevels.get(toKey(sunday));
+			if (level === 'good') return;
+			const previous = ranges[ranges.length - 1];
+			if (previous && previous.level === level && previous.end === index) {
+				previous.end = index + 1;
+			} else {
+				ranges.push({ start: index, end: index + 1, level: level });
+			}
+		});
+		return ranges;
+	}
+
+	function updateAttentionFlags(attentionLevels) {
+		const container = document.getElementById('calendar-container');
+		container.querySelectorAll('.attention-range').forEach(range => range.remove());
+		getAttentionRanges(weekSundays, attentionLevels).forEach(function (range) {
+			const section = document.createElement('div');
+			section.className = 'attention-range';
+			section.style.gridRow = (range.start + 1) + ' / ' + (range.end + 1);
+			const flag = document.createElement('div');
+			flag.className = 'attention-flag ' + range.level;
+			flag.textContent = range.level === 'fail' ? 'Below target' : 'At threshold';
+			flag.setAttribute('role', 'note');
+			flag.setAttribute('aria-label', flag.textContent + ', '
+				+ weekSundays[range.start].toLocaleDateString() + ' to '
+				+ addDays(weekSundays[range.end - 1], 6).toLocaleDateString());
+			flag.tabIndex = 0;
+			const bubble = document.createElement('span');
+			bubble.className = 'attention-flag-bubble';
+			bubble.id = 'attention-flag-help-' + range.start;
+			bubble.setAttribute('role', 'tooltip');
+			bubble.textContent = range.level === 'fail'
+				? 'Weeks in this range do not meet requirements.'
+				: 'No additional weeks can be spent WFH or OOF in this range.';
+			flag.setAttribute('aria-describedby', bubble.id);
+			flag.appendChild(bubble);
+			flag.addEventListener('keydown', function (event) {
+				if (event.key === 'Escape') {
+					flag.classList.add('bubble-dismissed');
+					event.stopPropagation();
+				}
+			});
+			function resetBubble() { flag.classList.remove('bubble-dismissed'); }
+			flag.addEventListener('mouseenter', resetBubble);
+			flag.addEventListener('focus', resetBubble);
+			section.appendChild(flag);
+			container.appendChild(section);
+		});
+	}
+
+	function getWeekAttentionStatus(level) {
+		return {
+			status: level,
+			description: level === 'fail'
+				? 'Below expectations: this week is part of a 12-week window with fewer than 8 qualifying weeks.'
+				: level === 'warn'
+					? 'At threshold: this week is part of a 12-week window with exactly 8 qualifying weeks. No additional weeks can be spent WFH or OOF in this range.'
+					: 'No additional constraint from complete 12-week windows in the displayed range. Incomplete windows are not evaluated.',
+		};
+	}
+
+	function updateWeekAttention(strip, level) {
+		const attention = getWeekAttentionStatus(level);
+		strip.className = 'week-attention ' + attention.status;
+		strip.title = attention.description;
+		strip.setAttribute('role', 'img');
+		strip.setAttribute('aria-label', strip.title);
+	}
+
 	// ===== Rendering =====
 	const today = new Date();
 	today.setHours(0, 0, 0, 0);
@@ -350,6 +452,8 @@
 
 	// Cache DOM refs per week for targeted updates
 	const weekElements = new Map(); // sunday key -> { row, infoCells, dayCells[] }
+	const minimapElements = new Map();
+	let topVisibleMinimapSegment = null;
 
 	function createIcon(name) {
 		const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -442,8 +546,8 @@
 
 		// Add edge buttons if vacation
 		if (s === 'vacation') {
-			const prev = addDays(date, -1);
-			const next = addDays(date, 1);
+			const prev = getOOFExtensionDate(date, -1);
+			const next = getOOFExtensionDate(date, 1);
 			const prevState = getDayState(prev);
 			const nextState = getDayState(next);
 
@@ -451,7 +555,7 @@
 				const btn = document.createElement('button');
 				btn.className = 'vacation-edge-btn left';
 				btn.appendChild(createIcon('left'));
-				btn.title = 'Extend vacation one day earlier';
+				btn.title = 'Extend out of office to ' + prev.toLocaleDateString();
 				btn.setAttribute('aria-label', btn.title);
 				btn.addEventListener('click', function (e) {
 					e.stopPropagation();
@@ -465,7 +569,7 @@
 				const btn = document.createElement('button');
 				btn.className = 'vacation-edge-btn right';
 				btn.appendChild(createIcon('right'));
-				btn.title = 'Extend vacation one day later';
+				btn.title = 'Extend out of office to ' + next.toLocaleDateString();
 				btn.setAttribute('aria-label', btn.title);
 				btn.addEventListener('click', function (e) {
 					e.stopPropagation();
@@ -495,12 +599,12 @@
 		const windowLevel = getWeekWindowStatus(sunday);
 		[
 			{
-				label: 'Week', count: weekResult.inOfficeDays, total: state.daysRequired,
+				label: 'This week', count: weekResult.inOfficeDays, total: state.daysRequired,
 				level: weekResult.meets ? 'good' : 'fail',
 				description: 'In-office days / required days',
 			},
 			{
-				label: 'Window', count: windowResult.passingWeeks, total: WINDOW_SIZE,
+				label: 'Window starting here', count: windowResult.passingWeeks, total: WINDOW_SIZE,
 				level: windowLevel,
 				description: 'Qualifying weeks / 12 weeks, ' + sunday.toLocaleDateString()
 					+ ' to ' + windowEnd.toLocaleDateString(),
@@ -516,7 +620,7 @@
 				+ ', ' + status.description);
 			row.appendChild(createIcon(incomplete ? 'question' : status.level === 'good' ? 'check' : status.level === 'warn' ? 'warning' : 'dismiss'));
 			const label = document.createElement('span');
-			label.textContent = status.label;
+			label.textContent = status.label + ':';
 			row.appendChild(label);
 			const count = document.createElement('span');
 			count.className = 'week-status-count';
@@ -528,6 +632,8 @@
 	}
 
 	function syncColumnHeader() {
+		document.getElementById('sidebar').style.setProperty('--sidebar-mobile-width',
+			document.querySelector('.app-layout').clientWidth + 'px');
 		const calendar = document.getElementById('calendar-container');
 		const scroller = document.querySelector('.calendar-scroll');
 		const header = document.getElementById('calendar-column-header');
@@ -541,6 +647,7 @@
 		row.style.paddingLeft = style.paddingLeft;
 		row.style.paddingRight = (parseFloat(style.paddingRight) + headerWidth - calendarWidth) + 'px';
 		header.scrollLeft = scroller.scrollLeft;
+		updateMinimapViewport();
 	}
 
 	function highlightNavigationTarget(element) {
@@ -569,6 +676,7 @@
 
 	function renderCalendar(highlightCurrentWeek = true) {
 		weekSundays = getWeekSundays();
+		const attentionLevels = computeWeekAttention(weekSundays);
 		const container = document.getElementById('calendar-container');
 		container.innerHTML = '';
 		weekElements.clear();
@@ -593,9 +701,11 @@
 		headerRow.appendChild(labels);
 		document.getElementById('calendar-column-header').replaceChildren(headerRow);
 
-		weekSundays.forEach(function (sunday) {
+		weekSundays.forEach(function (sunday, index) {
 			const row = document.createElement('div');
 			row.className = 'week-row';
+			row.style.gridRow = String(index + 1);
+			if (index === weekSundays.length - 1) row.classList.add('last-week');
 			if (sameDay(sunday, currentSunday)) row.classList.add('current-week');
 
 			// Left info panel
@@ -603,6 +713,10 @@
 			info.className = 'week-info';
 			updateWeekInfo(sunday, info);
 			row.appendChild(info);
+
+			const attention = document.createElement('div');
+			updateWeekAttention(attention, attentionLevels.get(toKey(sunday)));
+			row.appendChild(attention);
 
 			// Month label column
 			const monthLabel = document.createElement('div');
@@ -634,10 +748,13 @@
 			weekElements.set(toKey(sunday), {
 				row: row,
 				info: info,
+				attention: attention,
 				dayCells: dayCells,
 				sunday: sunday,
 			});
 		});
+
+		updateAttentionFlags(attentionLevels);
 
 		// Scroll to current week
 		const currentKey = toKey(currentSunday);
@@ -661,8 +778,13 @@
 		].forEach(function (status) {
 			const badge = document.createElement('span');
 			badge.className = 'summary-badge ' + status.level;
+			badge.title = status.label + ': ' + status.count;
+			badge.setAttribute('aria-label', badge.title);
 			badge.appendChild(createIcon(status.icon));
-			badge.appendChild(document.createTextNode(status.label));
+			const label = document.createElement('span');
+			label.className = 'summary-status-label';
+			label.textContent = status.label;
+			badge.appendChild(label);
 			const count = document.createElement('strong');
 			count.textContent = status.count;
 			badge.appendChild(count);
@@ -677,19 +799,46 @@
 	}
 
 	function updateAll() {
+		const attentionLevels = computeWeekAttention(weekSundays);
 		weekElements.forEach(function (entry) {
 			updateWeekInfo(entry.sunday, entry.info);
+			updateWeekAttention(entry.attention, attentionLevels.get(toKey(entry.sunday)));
 			for (let i = 0; i < 7; i++) {
 				const date = addDays(entry.sunday, i);
 				updateDayCellClass(entry.dayCells[i], date);
 			}
 		});
+		updateAttentionFlags(attentionLevels);
 		updateSummary();
 		updateMinimap();
 		syncColumnHeader();
 	}
 
 	// ===== Minimap =====
+	function updateMinimapViewport() {
+		let next = null;
+		if (weekElements.size) {
+			const viewport = document.querySelector('.calendar-scroll').getBoundingClientRect();
+			for (const [key, entry] of weekElements) {
+				const row = entry.row.getBoundingClientRect();
+				if (row.bottom > viewport.top && row.top < viewport.bottom) {
+					next = minimapElements.get(key) ?? null;
+					break;
+				}
+			}
+		}
+		if (next === topVisibleMinimapSegment) return;
+		if (topVisibleMinimapSegment) {
+			topVisibleMinimapSegment.classList.remove('mm-viewport');
+			topVisibleMinimapSegment.removeAttribute('aria-description');
+		}
+		if (next) {
+			next.classList.add('mm-viewport');
+			next.setAttribute('aria-description', 'Top visible week in the calendar');
+		}
+		topVisibleMinimapSegment = next;
+	}
+
 	function getWeekWindowStatus(sunday) {
 		const lastSunday = weekSundays[weekSundays.length - 1];
 		const windowEndSunday = addDays(sunday, (WINDOW_SIZE - 1) * 7);
@@ -711,16 +860,21 @@
 	function updateMinimap() {
 		const container = document.getElementById('minimap');
 		container.innerHTML = '';
+		minimapElements.clear();
+		topVisibleMinimapSegment = null;
+		const attentionLevels = computeWeekAttention(weekSundays);
 		weekSundays.forEach(function (sunday) {
 			const seg = document.createElement('button');
-			const status = getWeekWindowStatus(sunday);
+			const level = attentionLevels.get(toKey(sunday));
+			const attention = getWeekAttentionStatus(level);
+			const status = level === 'good' ? getWeekWindowStatus(sunday) : attention.status;
 			seg.className = 'minimap-segment mm-' + status;
 			if (sameDay(sunday, currentSunday)) {
 				seg.classList.add('mm-current');
 				seg.setAttribute('aria-current', 'date');
 			}
 			const statusDescription = ', ' + (status === 'out-of-range' ? 'Not enough data'
-				: status === 'good' ? 'Passing' : status === 'warn' ? 'At threshold' : 'Below target');
+				: status === 'good' ? 'Passing' : attention.description);
 			seg.title = formatDateRange(sunday) + statusDescription;
 			seg.setAttribute('aria-label', 'Jump to ' + formatDateRange(sunday) + ', ' + sunday.getFullYear() + statusDescription);
 			if (status === 'warn' || status === 'fail') {
@@ -736,33 +890,14 @@
 					scrollToWeek(entry.row);
 			});
 			container.appendChild(seg);
+			minimapElements.set(toKey(sunday), seg);
 		});
+		updateMinimapViewport();
 	}
 
 	// ===== Click Handling =====
 	function handleDayClick(dateKey, markMode = state.markMode) {
-		const date = fromKey(dateKey);
-		const currentState = getDayState(date);
-
-		if (markMode === 'work-from-home') {
-			state.dayStates[dateKey] = 'work-from-home';
-		} else if (markMode === 'out-of-office') {
-			// Toggle vacation
-			if (currentState === 'vacation') {
-				delete state.dayStates[dateKey];
-			} else {
-				state.dayStates[dateKey] = 'vacation';
-			}
-		} else {
-			// Toggle in-office
-			if (currentState === 'in-office') {
-				state.dayStates[dateKey] = isWeekend(date) ? 'weekend' : 'default';
-			} else {
-				state.dayStates[dateKey] = 'in-office';
-			}
-		}
-		saveState();
-		updateAll();
+		applyDayRange(dateKey, dateKey, markMode);
 	}
 
 	// ===== Drag Handling =====
@@ -783,10 +918,33 @@
 		return dates;
 	}
 
+	function getOOFExtensionDate(date, direction) {
+		let next = addDays(date, direction);
+		while (state.showHolidays && holidayMap[toKey(next)]) next = addDays(next, direction);
+		return next;
+	}
+
+	function getEditableDateKeys(dateKeys, mode) {
+		return mode === 'out-of-office'
+			? dateKeys.filter(key => !(state.showHolidays && holidayMap[key]))
+			: dateKeys;
+	}
+
+	function rangeMatchesTool(dateKeys, mode) {
+		const dayState = mode === 'out-of-office' ? 'vacation' : mode;
+		return dateKeys.every(key => getDayState(fromKey(key)) === dayState);
+	}
+
 	function applyDayRange(startKey, endKey, mode) {
 		const dayState = mode === 'out-of-office' ? 'vacation' : mode;
-		getDatesInRange(startKey, endKey).forEach(function (key) {
-			state.dayStates[key] = dayState;
+		const dateKeys = getEditableDateKeys(getDatesInRange(startKey, endKey), mode);
+		const reset = rangeMatchesTool(dateKeys, mode);
+		dateKeys.forEach(function (key) {
+			if (reset) {
+				delete state.dayStates[key];
+			} else {
+				state.dayStates[key] = dayState;
+			}
 		});
 		saveState();
 		updateAll();
@@ -796,14 +954,19 @@
 		document
 			.querySelectorAll('.day-cell.drag-highlight')
 			.forEach(function (el) {
-				el.classList.remove('drag-highlight', 'drag-in-office', 'drag-out-of-office', 'drag-work-from-home');
+				el.classList.remove('drag-highlight', 'drag-in-office', 'drag-out-of-office', 'drag-work-from-home', 'drag-reset');
 			});
 	}
 
 	function applyDragHighlights(dateKeys) {
+		dateKeys = getEditableDateKeys(dateKeys, dragState.mode);
+		const reset = rangeMatchesTool(dateKeys, dragState.mode);
 		dateKeys.forEach(function (key) {
 			const el = document.querySelector('.day-cell[data-date="' + key + '"]');
-			if (el) el.classList.add('drag-highlight', 'drag-' + dragState.mode);
+			if (el) {
+				el.classList.add('drag-highlight', 'drag-' + dragState.mode);
+				el.classList.toggle('drag-reset', reset);
+			}
 		});
 	}
 
@@ -850,6 +1013,19 @@
 	// ===== Event Wiring =====
 	function init() {
 		const savedStateStatus = loadState();
+		const sidebar = document.getElementById('sidebar');
+		const sidebarToggle = document.getElementById('sidebar-toggle-btn');
+		sidebarToggle.addEventListener('click', function () {
+			const collapsed = sidebar.classList.toggle('collapsed');
+			sidebar.classList.toggle('expanding', !collapsed);
+			sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
+			sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+			sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+			sidebarToggle.querySelector('use').setAttribute('href', collapsed ? '#icon-right' : '#icon-left');
+			const help = document.getElementById('rolling-window-help');
+			if (help.matches(':popover-open')) help.hidePopover();
+			syncColumnHeader();
+		});
 
 		const appInfoDialog = document.getElementById('app-info-dialog');
 		const welcomeDialog = document.getElementById('welcome-dialog');
@@ -933,9 +1109,7 @@
 				}
 			});
 		});
-		document.getElementById('dismiss-app-message-btn').addEventListener('click', function () {
-			document.getElementById('app-message').hidden = true;
-		});
+		document.getElementById('dismiss-app-message-btn').addEventListener('click', hideAppMessage);
 		document.getElementById('download-save-btn').addEventListener('click', function () {
 			try {
 				const blob = new Blob([createSaveFile()], { type: 'application/json' });
@@ -1000,7 +1174,7 @@
 			if (appInfoDialog.open) appInfoDialog.close();
 			if (welcomeDialog.open) welcomeDialog.close();
 			if (holidayInfoDialog.open) holidayInfoDialog.close();
-			showAppMessage('Save file loaded. Data saved locally.');
+			showAppMessage('Save file loaded');
 		});
 
 		document.querySelectorAll('[data-info-tooltip]').forEach(function (button) {
@@ -1194,6 +1368,7 @@
 		container.addEventListener('animationend', handleNavigationHighlightEnd);
 		scroller.addEventListener('scroll', function () {
 			document.getElementById('calendar-column-header').scrollLeft = scroller.scrollLeft;
+			updateMinimapViewport();
 		});
 		const columnHeaderObserver = new ResizeObserver(syncColumnHeader);
 		columnHeaderObserver.observe(container);
