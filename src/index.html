@@ -122,14 +122,18 @@
 								/>
 							</label>
 						</div>
-						<div class="settings-row holiday-toggle">
+						<div class="settings-row">
 							<label>
 								<input type="checkbox" id="show-holidays" />
 								Show Microsoft company holidays
 							</label>
-							<button class="info-button" id="holiday-info-btn" type="button" aria-label="About company holiday regions" aria-haspopup="dialog" aria-controls="holiday-info-dialog">
-								<svg class="icon" aria-hidden="true"><use href="#icon-info"/></svg>
-							</button>
+							<div class="holiday-location-setting">
+								<div>
+									<span id="current-holiday-location"></span>
+									<button class="text-link" id="change-holiday-location-btn" type="button" aria-label="Change holiday location" aria-haspopup="dialog" aria-controls="holiday-location-dialog">Change</button>
+								</div>
+								<span id="holiday-coverage-notice" role="status" hidden></span>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -217,14 +221,22 @@
 				</div>
 			</div>
 		</div>
-		<dialog class="app-dialog" id="holiday-info-dialog" aria-labelledby="holiday-info-title" aria-describedby="holiday-info-description">
+		<dialog class="app-dialog" id="holiday-location-dialog" aria-labelledby="holiday-location-title" aria-describedby="holiday-location-description">
 			<div class="dialog-heading">
-				<h2 id="holiday-info-title">Company holidays</h2>
-				<button class="info-button" id="close-holiday-info-btn" type="button" aria-label="Close company holiday information" autofocus>
+				<h2 id="holiday-location-title">Choose a holiday location</h2>
+				<button class="info-button" id="close-holiday-location-btn" type="button" aria-label="Close holiday location dialog">
 					<svg class="icon" aria-hidden="true"><use href="#icon-dismiss"/></svg>
 				</button>
 			</div>
-			<p id="holiday-info-description">Currently, BELT only applies to the Puget Sound area and their return to office rules. Therefore, only the United States (1010) holidays are included. If more regions implement BELT / RTO rules, more holiday options will be added.</p>
+			<p id="holiday-location-description">Data updated on <time id="holiday-data-updated"></time>. Double check with <a href="https://holidays.microsoft.com" target="_blank" rel="noopener noreferrer">https://holidays.microsoft.com</a> to ensure accuracy.</p>
+			<input id="holiday-location-search" type="search" aria-label="Search holiday locations" placeholder="Country, location, or company code" autocomplete="off" autofocus />
+			<p id="holiday-location-count" role="status" aria-live="polite"></p>
+			<ul id="holiday-location-list" aria-label="Holiday locations"></ul>
+			<p id="holiday-location-selection" aria-live="polite"><strong>Selected: </strong><span id="holiday-location-selected-name"></span></p>
+			<div class="dialog-actions">
+				<button class="today-button primary-button" id="apply-holiday-location-btn" type="button">Use this location</button>
+				<button class="today-button" id="cancel-holiday-location-btn" type="button">Cancel</button>
+			</div>
 			<p class="dialog-message" role="alert" hidden></p>
 		</dialog>
 		<dialog class="app-dialog" id="welcome-dialog" aria-labelledby="welcome-title" aria-describedby="welcome-intro">
@@ -273,6 +285,9 @@
 				</svg>
 				<p><strong>Changes are saved automatically</strong> using your browser's Local Storage. You can also export a save file from the Info Dialog, accessible from the info icon in the lower left.</p>
 			</div>
+			<div class="welcome-actions">
+				<button class="today-button primary-button" id="welcome-start-btn" type="button">Let's go!</button>
+			</div>
 			<p id="welcome-message" class="dialog-message" role="alert" hidden></p>
 		</dialog>
 		<div class="info-tooltip" id="rolling-window-help" popover="auto" role="tooltip">
@@ -297,6 +312,7 @@
 		</div>
 		<div class="cursor-icon" id="cursor-icon" aria-hidden="true"></div>
 		<script src="app-info.js"></script>
+		<script src="holiday-data.js"></script>
 		<script src="app.js"></script>
 	</body>
 </html>

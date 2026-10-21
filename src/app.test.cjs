@@ -5,6 +5,7 @@ const vm = require('node:vm');
 
 const source = readFileSync(require.resolve('./app.js'), 'utf8');
 const appInfoSource = readFileSync(require.resolve('./app-info.js'), 'utf8');
+const holidayData = JSON.parse(readFileSync(require.resolve('./corporate-holidays-2026-2027.json'), 'utf8'));
 
 function createPlanner(savedState, environment = {}) {
 	let stored = savedState && JSON.stringify(savedState);
@@ -30,6 +31,7 @@ function createPlanner(savedState, environment = {}) {
 		...environment,
 	});
 	vm.runInContext(appInfoSource, context);
+	vm.runInContext('const BELT_HOLIDAY_DATA = ' + JSON.stringify(environment.holidayData ?? holidayData), context);
 	vm.runInContext(source.replace('// Boot', `
 		globalThis.planner = {
 			state, getDayState, getWeekSundays, evaluateWeek, evaluateWindow, updateWeekInfo,
@@ -44,6 +46,8 @@ function createPlanner(savedState, environment = {}) {
 			setDragMode: mode => { dragState = { mode }; },
 			getNextAttentionWeek,
 			createSaveFile, parseSaveFile, restoreSaveFile,
+			setHolidayLocation, getHolidayLocationLabel, findHolidayGeos, getHolidayAvailability,
+			getHolidayCoverageMessage, buildHolidayMap,
 			showAppMessage, hideAppMessage,
 			scrollToWeek,
 			setWeeks: () => { weekSundays = getWeekSundays(); },
@@ -385,7 +389,7 @@ function dayCell(dateKey) {
 	};
 }
 
-test('native day tooltips show the full date and every effective status', () => {
+test('days have no hover tooltip but retain accessible full dates and every effective status', () => {
 	const planner = createPlanner();
 	const cases = [
 		['2027-01-04', 'default', 'Work from home'],
@@ -409,25 +413,30 @@ test('native day tooltips show the full date and every effective status', () => 
 		const fullDate = date.toLocaleDateString(undefined, {
 			weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
 		});
-		const holiday = key === '2027-01-01' ? "\nNew Year's Day" : '';
-		assert.equal(cell.title, fullDate + '\nMarked as: ' + status + holiday);
-		assert.equal(cell.attributes['aria-label'], cell.title.replaceAll('\n', ', '));
+		const holiday = key === '2027-01-01' ? ", New Year's Day" : '';
+		assert.equal(cell.title, undefined);
+		assert.equal(cell.attributes.title, undefined);
+		assert.equal(cell.attributes['aria-label'], fullDate + ', Marked as: ' + status + holiday);
 	}
 });
 
-test('day tooltips refresh after marking changes and hiding holidays', () => {
+test('day accessibility labels refresh without adding tooltips after marking changes and hiding holidays', () => {
 	const planner = createPlanner();
 	const cell = dayCell('2027-01-01');
 	const date = new Date(2027, 0, 1);
 	planner.updateDayCellClass(cell, date);
-	assert.match(cell.title, /Marked as: MSFT holiday\nNew Year's Day$/);
+	assert.match(cell.attributes['aria-label'], /Marked as: MSFT holiday, New Year's Day$/);
+	assert.equal(cell.title, undefined);
 	planner.state.showHolidays = false;
 	planner.updateDayCellClass(cell, date);
-	assert.match(cell.title, /Marked as: Work from home$/);
+	assert.match(cell.attributes['aria-label'], /Marked as: Work from home$/);
+	assert.equal(cell.title, undefined);
 	planner.state.markMode = 'in-office';
 	planner.handleDayClick('2027-01-01');
 	planner.updateDayCellClass(cell, date);
-	assert.match(cell.title, /Marked as: In office$/);
+	assert.match(cell.attributes['aria-label'], /Marked as: In office$/);
+	assert.equal(cell.title, undefined);
+	assert.equal(cell.attributes.title, undefined);
 });
 
 test('expanding the visible range inherits the saved recurring schedule', () => {
@@ -530,7 +539,7 @@ test('holiday toggles reassess saved office entries only on recurring holiday we
 	planner.setShowHolidays(true);
 	assert.equal(planner.getDayState(new Date(2027, 0, 1)), 'default');
 	assert.equal(planner.state.dayStates['2027-01-01'], undefined);
-	assert.equal(planner.state.dayStates['2029-11-23'], undefined);
+	assert.equal(planner.state.dayStates['2029-11-23'], 'in-office');
 	assert.equal(planner.getDayState(new Date(2027, 11, 24)), 'default');
 	assert.equal(planner.state.dayStates['2027-12-24'], 'vacation');
 	assert.equal(planner.getDayState(new Date(2027, 11, 31)), 'work-from-home');
@@ -848,7 +857,7 @@ test('minimap shows insufficient history at the top and attention colors through
 	assert.ok(minimap.children.every(segment => segment.className.includes('mm-out-of-range')));
 });
 
-test('minimap viewport marker tracks partial weeks, boundaries, rebuilds, and preserves today', () => {
+test('minimap viewport accessibility tracks partial weeks, boundaries, rebuilds, and preserves today', () => {
 	let offset = 0;
 	function element() {
 		return {
@@ -1432,4 +1441,185 @@ test('failed local storage writes leave the current plan intact during restore',
 	assert.throws(() => planner.restoreSaveFile(JSON.stringify(imported)), /Storage is full/);
 	assert.equal(planner.state.daysRequired, 4);
 	assert.deepEqual(planner.saved(), before);
+});
+
+const usHolidayLocation = { countryCode: 'US', companyCode: '1010', personnelSubAreaCode: '0' };
+const indiaHolidayLocation = { countryCode: 'IN', companyCode: '1098', personnelSubAreaCode: '1000' };
+
+test('new plans and legacy saves default to United States 1010, not a generated calendar ID', () => {
+	const planner = createPlanner();
+	assert.deepEqual(JSON.parse(planner.createSaveFile()).data.holidayLocation, usHolidayLocation);
+	assert.equal(planner.getHolidayLocationLabel(planner.state.holidayLocation), 'United States (1010)');
+	const legacy = JSON.parse(planner.createSaveFile());
+	delete legacy.data.holidayLocation;
+	planner.setHolidayLocation(indiaHolidayLocation);
+	planner.restoreSaveFile(JSON.stringify(legacy));
+	assert.deepEqual(planner.saved().holidayLocation, usHolidayLocation);
+	assert.equal(planner.buildHolidayMap(planner.state.holidayLocation)['2027-01-18'], 'Martin Luther King Day');
+	assert.deepEqual(JSON.parse(createPlanner({ showHolidays: false }).createSaveFile()).data.holidayLocation, usHolidayLocation);
+});
+
+test('location identity round-trips locally and in save files even after calendar IDs and display names change', () => {
+	const planner = createPlanner();
+	planner.setHolidayLocation(indiaHolidayLocation);
+	assert.deepEqual(planner.saved().holidayLocation, indiaHolidayLocation);
+	assert.equal(JSON.stringify(planner.saved()).includes('calendarId'), false);
+	const file = planner.createSaveFile();
+	const refreshedData = structuredClone(holidayData);
+	const geo = refreshedData.geos.find(geo => geo.countryCode === 'IN' && geo.companyCode === '1098' && geo.personnelSubAreaCode === '1000');
+	const previousId = geo.calendarId;
+	refreshedData.calendars['new-scrape-bucket'] = refreshedData.calendars[previousId];
+	delete refreshedData.calendars[previousId];
+	for (const entry of refreshedData.geos) {
+		if (entry.calendarId === previousId) entry.calendarId = 'new-scrape-bucket';
+	}
+	geo.name = 'Renamed New Delhi location';
+	const reloaded = createPlanner(planner.saved(), { holidayData: refreshedData });
+	assert.match(reloaded.getHolidayLocationLabel(reloaded.state.holidayLocation), /Renamed New Delhi/);
+	assert.equal(JSON.stringify(reloaded.buildHolidayMap(reloaded.state.holidayLocation)), JSON.stringify(planner.buildHolidayMap(indiaHolidayLocation)));
+	const restored = createPlanner(undefined, { holidayData: refreshedData });
+	restored.restoreSaveFile(file);
+	assert.deepEqual(restored.saved().holidayLocation, indiaHolidayLocation);
+	assert.equal(JSON.stringify(restored.buildHolidayMap(restored.state.holidayLocation)), JSON.stringify(planner.buildHolidayMap(indiaHolidayLocation)));
+});
+
+test('changing location recomputes recurrence, OOF behavior, accessible labels and evaluation without altering manual markings', () => {
+	const planner = createPlanner({ regularDays: [1, 2, 3, 4, 5], dayStates: {
+		'2026-10-02': 'vacation', '2027-01-01': 'work-from-home', '2027-01-18': 'in-office',
+	} });
+	const before = JSON.stringify(planner.state.dayStates);
+	assert.equal(planner.getDayState(new Date(2026, 9, 2)), 'vacation');
+	planner.setHolidayLocation(indiaHolidayLocation);
+	assert.equal(planner.getDayState(new Date(2026, 9, 2)), 'default');
+	assert.equal(planner.getDayState(new Date(2027, 0, 1)), 'work-from-home');
+	assert.equal(planner.getDayState(new Date(2027, 0, 18)), 'in-office');
+	assert.equal(planner.evaluateWeek(new Date(2026, 8, 27)).inOfficeDays, 4);
+	const cell = dayCell('2026-10-02');
+	planner.updateDayCellClass(cell, new Date(2026, 9, 2));
+	assert.match(cell.attributes['aria-label'], /MSFT holiday, Gandhi Jayanti/);
+	assert.equal(cell.title, undefined);
+	planner.setHolidayLocation(usHolidayLocation);
+	assert.equal(planner.getDayState(new Date(2026, 9, 2)), 'vacation');
+	assert.equal(JSON.stringify(planner.state.dayStates), before);
+});
+
+test('source dates replace US estimates and never fabricate holidays outside the published years', () => {
+	const planner = createPlanner({ regularDays: [1, 2, 3, 4, 5] });
+	const map = planner.buildHolidayMap(usHolidayLocation);
+	assert.equal(map['2027-12-23'], undefined);
+	assert.equal(map['2027-12-24'], 'Christmas Eve');
+	assert.equal(map['2027-12-27'], 'Christmas Day');
+	assert.equal(map['2027-12-31'], "New Year's Day");
+	assert.equal(planner.getDayState(new Date(2028, 0, 17)), 'in-office');
+	assert.match(planner.getHolidayCoverageMessage([new Date(2027, 11, 26)]), /2028/);
+	assert.equal(planner.getHolidayCoverageMessage([new Date(2027, 0, 3)]), '');
+	planner.setShowHolidays(false);
+	assert.equal(planner.getHolidayCoverageMessage([new Date(2028, 0, 2)]), '');
+});
+
+test('all source locations expand to the exact published dates, including inclusive multi-day ranges', () => {
+	const planner = createPlanner();
+	assert.equal(planner.findHolidayGeos('').length, holidayData.geos.length);
+	assert.equal(new Set(holidayData.geos.map(geo => [geo.countryCode, geo.companyCode, geo.personnelSubAreaCode].join(':'))).size, holidayData.geos.length);
+	for (const geo of holidayData.geos) {
+		const expected = {};
+		for (const holiday of holidayData.calendars[geo.calendarId].holidays) {
+			assert.ok(holiday.endDate >= holiday.startDate);
+			const end = Date.parse(holiday.endDate);
+			for (let time = Date.parse(holiday.startDate); time <= end; time += 86400000) {
+				const key = new Date(time).toISOString().slice(0, 10);
+				if (!expected[key]) expected[key] = new Set();
+				expected[key].add(holiday.name.trim());
+			}
+		}
+		assert.deepEqual(
+			JSON.parse(JSON.stringify(planner.buildHolidayMap(geo))),
+			Object.fromEntries(Object.entries(expected).map(([date, names]) => [date, [...names].join('; ')])),
+			geo.name + ' / ' + geo.companyCode + ' / ' + geo.personnelSubAreaCode,
+		);
+	}
+	const israel = planner.buildHolidayMap({ countryCode: 'IL', companyCode: '1055', personnelSubAreaCode: '0' });
+	for (let day = 3; day <= 8; day++) assert.match(israel['2026-04-0' + day], /Hol Hamoed - Passover/);
+});
+
+test('overlapping holidays keep all distinct names without duplicating a name', () => {
+	const data = structuredClone(holidayData);
+	const us = data.geos.find(geo => geo.companyCode === '1010');
+	data.calendars[us.calendarId].holidays.push(
+		{ startDate: '2027-01-01', endDate: '2027-01-02', name: 'Additional holiday' },
+		{ startDate: '2027-01-01', endDate: '2027-01-01', name: "New Year's Day" },
+	);
+	const planner = createPlanner(undefined, { holidayData: data });
+	const map = planner.buildHolidayMap(usHolidayLocation);
+	assert.equal(map['2027-01-01'], "New Year's Day; Additional holiday");
+	assert.equal(map['2027-01-02'], 'Additional holiday');
+});
+
+test('search supports names, source codes, sub-areas, accents, whitespace and no results', () => {
+	const planner = createPlanner();
+	assert.equal(planner.findHolidayGeos('1010')[0].name, 'United States');
+	assert.equal(planner.findHolidayGeos('  NEW Delhi 1098  ').length, 1);
+	assert.equal(planner.findHolidayGeos('australia nsw 1074')[0].personnelSubAreaCode, '1000');
+	assert.ok(planner.findHolidayGeos('cote').length > 0);
+	assert.equal(planner.findHolidayGeos('no-such-location-at-all').length, 0);
+});
+
+test('partial and empty calendars report missing data and never substitute US holidays', () => {
+	const planner = createPlanner();
+	const brazil = { countryCode: 'BR', companyCode: '1057', personnelSubAreaCode: '0' };
+	planner.setHolidayLocation(brazil);
+	assert.match(planner.getHolidayCoverageMessage([new Date(2027, 0, 3)]), /No published holiday data for 2027/);
+	assert.equal(planner.getHolidayCoverageMessage([new Date(2026, 0, 4)]), '');
+	assert.equal(planner.buildHolidayMap(brazil)['2027-01-18'], undefined);
+	assert.equal(planner.getHolidayAvailability(brazil), 'No 2027 data');
+	const empty = { countryCode: 'FR', companyCode: '1672', personnelSubAreaCode: '0' };
+	planner.setHolidayLocation(empty);
+	assert.match(planner.getHolidayCoverageMessage([new Date(2026, 0, 4)]), /No published holiday data for this location/);
+	assert.equal(Object.keys(planner.buildHolidayMap(empty)).length, 0);
+});
+
+test('location availability labels only flag missing 2027 data, including empty calendars', () => {
+	const planner = createPlanner();
+	for (const geo of holidayData.geos) {
+		const has2027 = holidayData.calendars[geo.calendarId].availableYears.includes('2027');
+		assert.equal(planner.getHolidayAvailability(geo), has2027 ? '' : 'No 2027 data');
+	}
+});
+
+test('unavailable saved locations retain their identity, apply no holidays, and clearly report the problem', () => {
+	const unknown = { countryCode: 'ZZ', companyCode: 'unknown-company', personnelSubAreaCode: 'unknown-area' };
+	const planner = createPlanner({ holidayLocation: unknown, regularDays: [5] });
+	assert.equal(planner.loadStatus, 'loaded');
+	assert.match(planner.getHolidayLocationLabel(planner.state.holidayLocation), /Unavailable location/);
+	assert.match(planner.getHolidayCoverageMessage([new Date(2027, 0, 3)]), /not in the current dataset/);
+	assert.equal(planner.getDayState(new Date(2027, 0, 1)), 'in-office');
+	const save = planner.createSaveFile();
+	const restored = createPlanner();
+	restored.restoreSaveFile(save);
+	assert.deepEqual(restored.saved().holidayLocation, unknown);
+	assert.equal(Object.keys(restored.buildHolidayMap(restored.state.holidayLocation)).length, 0);
+});
+
+test('malformed saved locations fail before altering stored settings or the active holiday calendar', () => {
+	const planner = createPlanner();
+	planner.setHolidayLocation(indiaHolidayLocation);
+	const before = planner.saved();
+	const valid = JSON.parse(planner.createSaveFile());
+	for (const holidayLocation of [null, [], 'calendar-284', {}, { ...usHolidayLocation, companyCode: 1010 },
+		{ ...usHolidayLocation, countryCode: '' }, { ...usHolidayLocation, personnelSubAreaCode: 'a:b' }]) {
+		const file = { ...valid, data: { ...valid.data, holidayLocation } };
+		assert.throws(() => planner.restoreSaveFile(JSON.stringify(file)), /save file contains an invalid holiday location/);
+		assert.deepEqual(planner.saved(), before);
+		assert.match(planner.buildHolidayMap(planner.state.holidayLocation)['2026-10-02'], /Gandhi Jayanti/);
+	}
+});
+
+test('generated holiday script contains the source dataset and loads before the app without runtime fetches', () => {
+	const script = readFileSync(require.resolve('./holiday-data.js'), 'utf8');
+	const serialized = vm.runInNewContext(script + '\nJSON.stringify(BELT_HOLIDAY_DATA)');
+	assert.deepEqual(JSON.parse(serialized), holidayData);
+	const html = readFileSync(require.resolve('./index.html'), 'utf8');
+	assert.ok(html.indexOf('<script src="holiday-data.js">') < html.indexOf('<script src="app.js">'));
+	assert.equal(/\bfetch\s*\(/.test(script), false);
+	assert.ok(html.includes('id="holiday-location-dialog"'));
 });

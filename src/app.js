@@ -20,6 +20,9 @@
 		'Dec',
 	];
 	const STORAGE_KEY = 'belt-planner-state';
+	const DEFAULT_HOLIDAY_LOCATION = Object.freeze({
+		countryCode: 'US', companyCode: '1010', personnelSubAreaCode: '0',
+	});
 
 	// ===== State =====
 	const state = {
@@ -33,6 +36,7 @@
 		// Array of day-of-week indices (0=Sun..6=Sat) that are regular in-office days
 		regularDays: [],
 		showHolidays: true,
+		holidayLocation: { ...DEFAULT_HOLIDAY_LOCATION },
 	};
 
 	let dragState = null; // { startDate, currentDate, mode, active }
@@ -89,56 +93,167 @@
 	}
 
 	// ===== Microsoft Company Holidays =====
-	function getNthWeekday(year, month, weekday, n) {
-		var first = new Date(year, month, 1);
-		var diff = (weekday - first.getDay() + 7) % 7;
-		return new Date(year, month, 1 + diff + (n - 1) * 7);
+	function holidayLocationKey(location) {
+		return [location.countryCode, location.companyCode, location.personnelSubAreaCode].join(':');
 	}
 
-	function getLastWeekday(year, month, weekday) {
-		var last = new Date(year, month + 1, 0);
-		var diff = (last.getDay() - weekday + 7) % 7;
-		return new Date(year, month, last.getDate() - diff);
+	function readHolidayLocation(value = DEFAULT_HOLIDAY_LOCATION) {
+		const fields = ['countryCode', 'companyCode', 'personnelSubAreaCode'];
+		if (!value || typeof value !== 'object' || Array.isArray(value) ||
+			fields.some(field => typeof value[field] !== 'string' || !value[field].trim() || value[field].includes(':'))) {
+			throw new Error('The save file contains an invalid holiday location.');
+		}
+		return Object.fromEntries(fields.map(field => [field, value[field]]));
 	}
 
-	function observedDate(year, month, day) {
-		var d = new Date(year, month, day);
-		var dow = d.getDay();
-		if (dow === 6) return new Date(year, month, day - 1);
-		if (dow === 0) return new Date(year, month, day + 1);
-		return d;
+	const holidayGeos = new Map(BELT_HOLIDAY_DATA.geos.map(geo => [holidayLocationKey(geo), geo]));
+	const sortedHolidayGeos = [...holidayGeos.values()].sort((a, b) =>
+		a.name.localeCompare(b.name) || a.companyCode.localeCompare(b.companyCode, undefined, { numeric: true }) ||
+		a.personnelSubAreaCode.localeCompare(b.personnelSubAreaCode, undefined, { numeric: true }));
+
+	function normalizeHolidaySearch(value) {
+		return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 	}
 
-	function getChristmasPair(year) {
-		var eveDow = new Date(year, 11, 24).getDay();
-		if (eveDow === 5) return [new Date(year, 11, 24), new Date(year, 11, 23)];
-		if (eveDow === 6) return [new Date(year, 11, 23), new Date(year, 11, 26)];
-		if (eveDow === 0) return [new Date(year, 11, 22), new Date(year, 11, 25)];
-		return [new Date(year, 11, 24), new Date(year, 11, 25)];
+	const holidaySearchText = new Map(sortedHolidayGeos.map(geo => [holidayLocationKey(geo),
+		normalizeHolidaySearch([geo.name, geo.countryName, geo.countryCode, geo.companyCode,
+			geo.personnelSubAreaName, geo.personnelSubAreaCode].join(' '))]));
+
+	function findHolidayGeos(query) {
+		const terms = normalizeHolidaySearch(query).trim().split(/\s+/).filter(Boolean);
+		return sortedHolidayGeos.filter(geo => terms.every(term => holidaySearchText.get(holidayLocationKey(geo)).includes(term)));
 	}
 
-	function getMicrosoftHolidays(year) {
-		var thanksgiving = getNthWeekday(year, 10, 4, 4);
-		var christmas = getChristmasPair(year);
-		return [
-			{ name: "New Year's Day", date: observedDate(year, 0, 1) },
-			{ name: 'MLK Day', date: getNthWeekday(year, 0, 1, 3) },
-			{ name: "Presidents' Day", date: getNthWeekday(year, 1, 1, 3) },
-			{ name: 'Memorial Day', date: getLastWeekday(year, 4, 1) },
-			{ name: 'Independence Day', date: observedDate(year, 6, 4) },
-			{ name: 'Labor Day', date: getNthWeekday(year, 8, 1, 1) },
-			{ name: 'Thanksgiving', date: thanksgiving },
-			{ name: 'Day after Thanksgiving', date: addDays(thanksgiving, 1) },
-			{ name: 'Christmas Eve', date: christmas[0] },
-			{ name: 'Christmas Day', date: christmas[1] },
-		];
+	function getHolidayCalendar(location) {
+		const geo = holidayGeos.get(holidayLocationKey(location));
+		return geo ? BELT_HOLIDAY_DATA.calendars[geo.calendarId] : null;
 	}
 
-	var holidayMap = {};
-	for (var y = 2026; y <= 2030; y++) {
-		getMicrosoftHolidays(y).forEach(function (h) {
-			holidayMap[toKey(h.date)] = h.name;
+	function buildHolidayMap(location) {
+		const map = Object.create(null);
+		const calendar = getHolidayCalendar(location);
+		if (calendar) {
+			for (const holiday of calendar.holidays) {
+				for (let date = fromKey(holiday.startDate); toKey(date) <= holiday.endDate; date = addDays(date, 1)) {
+					const key = toKey(date);
+					if (!map[key]) map[key] = new Set();
+					map[key].add(holiday.name.trim());
+				}
+			}
+		}
+		return Object.fromEntries(Object.entries(map).map(([date, names]) => [date, [...names].join('; ')]));
+	}
+
+	let holidayMap = buildHolidayMap(state.holidayLocation);
+
+	function getHolidayLocationLabel(location) {
+		const geo = holidayGeos.get(holidayLocationKey(location));
+		if (!geo) return 'Unavailable location (' + holidayLocationKey(location) + ')';
+		return geo.name + ' (' + geo.companyCode +
+			(geo.personnelSubAreaCode === '0' ? '' : ' / ' + geo.personnelSubAreaCode) + ')';
+	}
+
+	function getHolidayAvailability(geo) {
+		return getHolidayCalendar(geo).availableYears.includes('2027') ? '' : 'No 2027 data';
+	}
+
+	function getHolidayCoverageMessage(sundays) {
+		if (!state.showHolidays) return '';
+		const calendar = getHolidayCalendar(state.holidayLocation);
+		if (!calendar) return 'This saved location is not in the current dataset. No holidays are applied. Choose another holiday location.';
+		if (!calendar.availableYears.length) return 'No published holiday data for this location. No holidays are applied.';
+		const years = new Set(sundays.flatMap(sunday => [sunday.getFullYear(), addDays(sunday, 6).getFullYear()]));
+		const missing = [...years].sort().filter(year => !calendar.availableYears.includes(String(year)));
+		return missing.length ? 'No published holiday data for ' + missing.join(', ') +
+			'. Dates in those years are not marked as holidays.' : '';
+	}
+
+	function updateHolidaySettings() {
+		document.getElementById('current-holiday-location').textContent = getHolidayLocationLabel(state.holidayLocation);
+		const notice = document.getElementById('holiday-coverage-notice');
+		notice.textContent = getHolidayCoverageMessage(weekSundays);
+		notice.hidden = !notice.textContent;
+	}
+
+	function setHolidayLocation(location) {
+		state.holidayLocation = readHolidayLocation(location);
+		holidayMap = buildHolidayMap(state.holidayLocation);
+		saveState();
+		updateAll();
+	}
+
+	function initHolidayLocationPicker() {
+		const dialog = document.getElementById('holiday-location-dialog');
+		const updatedDate = document.getElementById('holiday-data-updated');
+		updatedDate.dateTime = BELT_HOLIDAY_DATA.source.retrievedAt.slice(0, 10);
+		updatedDate.textContent = new Date(BELT_HOLIDAY_DATA.source.retrievedAt)
+			.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+		const search = document.getElementById('holiday-location-search');
+		const list = document.getElementById('holiday-location-list');
+		const apply = document.getElementById('apply-holiday-location-btn');
+		let pendingLocation;
+
+		function updateSelection() {
+			document.getElementById('holiday-location-selected-name').textContent =
+				getHolidayLocationLabel(pendingLocation);
+			apply.disabled = !holidayGeos.has(holidayLocationKey(pendingLocation));
+		}
+		function renderLocations() {
+			const geos = findHolidayGeos(search.value);
+			const items = geos.map(geo => {
+				const item = document.createElement('li');
+				const label = document.createElement('label');
+				const radio = document.createElement('input');
+				radio.type = 'radio';
+				radio.name = 'holiday-location-choice';
+				radio.value = holidayLocationKey(geo);
+				radio.checked = radio.value === holidayLocationKey(pendingLocation);
+				radio.addEventListener('change', function () {
+					pendingLocation = readHolidayLocation(geo);
+					updateSelection();
+				});
+				const text = document.createElement('span');
+				const name = document.createElement('strong');
+				name.textContent = geo.name;
+				const details = document.createElement('span');
+				details.className = 'holiday-location-details';
+				details.textContent = ' | ' + geo.countryCode + ' | Company ' + geo.companyCode +
+					' | Area ' + geo.personnelSubAreaCode + ' (' + geo.personnelSubAreaName + ')';
+				text.append(name, details);
+				const availability = getHolidayAvailability(geo);
+				if (availability) {
+					const coverage = document.createElement('span');
+					coverage.className = 'holiday-location-details';
+					coverage.textContent = ' | ' + availability;
+					text.appendChild(coverage);
+				}
+				label.append(radio, text);
+				item.appendChild(label);
+				return item;
+			});
+			list.replaceChildren(...items);
+			list.scrollTop = 0;
+			document.getElementById('holiday-location-count').textContent = geos.length
+				? geos.length + ' of ' + holidayGeos.size + ' locations'
+				: 'No matching locations. Try a country, location name, or company code.';
+		}
+		document.getElementById('change-holiday-location-btn').addEventListener('click', function () {
+			pendingLocation = { ...state.holidayLocation };
+			search.value = '';
+			dialog.querySelector('.dialog-message').hidden = true;
+			updateSelection();
+			renderLocations();
+			dialog.showModal();
+			search.focus();
 		});
+		search.addEventListener('input', renderLocations);
+		apply.addEventListener('click', function () {
+			dialog.close();
+			setHolidayLocation(pendingLocation);
+		});
+		document.getElementById('close-holiday-location-btn').addEventListener('click', () => dialog.close());
+		document.getElementById('cancel-holiday-location-btn').addEventListener('click', () => dialog.close());
+		return dialog;
 	}
 
 	// ===== Persistence =====
@@ -150,6 +265,7 @@
 			dayStates: state.dayStates,
 			regularDays: state.regularDays,
 			showHolidays: state.showHolidays,
+			holidayLocation: { ...state.holidayLocation },
 		};
 	}
 
@@ -238,6 +354,7 @@
 			weeksForward: data.weeksForward,
 			regularDays: data.regularDays.slice(),
 			showHolidays: data.showHolidays,
+			holidayLocation: readHolidayLocation(data.holidayLocation),
 			dayStates: Object.fromEntries(entries),
 		};
 	}
@@ -247,6 +364,7 @@
 		// Persist before changing the current plan so a failed write leaves it intact.
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 		Object.assign(state, data);
+		holidayMap = buildHolidayMap(state.holidayLocation);
 	}
 
 	function loadState() {
@@ -254,6 +372,7 @@
 			const raw = localStorage.getItem(STORAGE_KEY);
 			if (raw === null) return 'empty';
 			const data = JSON.parse(raw);
+			const holidayLocation = readHolidayLocation(data.holidayLocation);
 			if (typeof data.daysRequired === 'number') {
 				state.daysRequired = data.daysRequired;
 			}
@@ -272,6 +391,8 @@
 			if (typeof data.weeksForward === 'number') {
 				state.weeksForward = data.weeksForward;
 			}
+			state.holidayLocation = holidayLocation;
+			holidayMap = buildHolidayMap(state.holidayLocation);
 			return 'loaded';
 		} catch (e) {
 			console.error('Unable to load locally saved planner data.', e);
@@ -513,8 +634,6 @@
 		const fullDate = date.toLocaleDateString(undefined, {
 			weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
 		});
-		cell.title = fullDate + '\nMarked as: ' + statusName
-			+ (holidayName ? '\n' + holidayName : '');
 		cell.setAttribute('aria-label', fullDate + ', Marked as: ' + statusName
 			+ (holidayName ? ', ' + holidayName : ''));
 		const statusSpan = cell.querySelector('.day-status');
@@ -707,6 +826,7 @@
 
 	function renderCalendar(highlightCurrentWeek = true) {
 		weekSundays = getWeekSundays();
+		updateHolidaySettings();
 		const attentionLevels = computeWeekAttention(weekSundays);
 		const container = document.getElementById('calendar-container');
 		container.innerHTML = '';
@@ -828,6 +948,7 @@
 	}
 
 	function updateAll() {
+		updateHolidaySettings();
 		const attentionLevels = computeWeekAttention(weekSundays);
 		weekElements.forEach(function (entry) {
 			updateWeekInfo(entry.sunday, entry.info);
@@ -1178,16 +1299,11 @@
 			regularDaysSetting.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 			highlightNavigationTarget(regularDaysSetting);
 		});
-		const holidayInfoDialog = document.getElementById('holiday-info-dialog');
-		document.getElementById('holiday-info-btn').addEventListener('click', function () {
-			holidayInfoDialog.querySelector('.dialog-message').hidden = true;
-			holidayInfoDialog.showModal();
-		});
-		document.getElementById('close-holiday-info-btn').addEventListener('click', function () {
-			holidayInfoDialog.close();
-		});
-		document.getElementById('close-welcome-btn').addEventListener('click', function () {
-			welcomeDialog.close();
+		const holidayLocationDialog = initHolidayLocationPicker();
+		['close-welcome-btn', 'welcome-start-btn'].forEach(function (id) {
+			document.getElementById(id).addEventListener('click', function () {
+				welcomeDialog.close();
+			});
 		});
 		const clearDataButton = document.getElementById('clear-data-btn');
 		const clearDataConfirmation = document.getElementById('clear-data-confirmation');
@@ -1230,7 +1346,7 @@
 		document.getElementById('close-app-info-btn').addEventListener('click', function () {
 			appInfoDialog.close();
 		});
-		[appInfoDialog, welcomeDialog, holidayInfoDialog].forEach(function (dialog) {
+		[appInfoDialog, welcomeDialog, holidayLocationDialog].forEach(function (dialog) {
 			dialog.addEventListener('keydown', function (event) {
 				if (event.key === 'Escape') {
 					event.preventDefault();
@@ -1312,7 +1428,7 @@
 			updateMinimap();
 			if (appInfoDialog.open) appInfoDialog.close();
 			if (welcomeDialog.open) welcomeDialog.close();
-			if (holidayInfoDialog.open) holidayInfoDialog.close();
+			if (holidayLocationDialog.open) holidayLocationDialog.close();
 			showAppMessage('Save file loaded');
 		});
 
